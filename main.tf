@@ -28,7 +28,7 @@ module "vpc_central" {
 
 resource "aws_security_group" "sg_central" {
   name        = "secgroup-central"
-  description = "Security Group para Bodega Central (ECS)"
+  description = "Security Group para Bodega Central (ECS y RabbitMQ Broker)"
   vpc_id      = module.vpc_central.vpc_id
 
   ingress {
@@ -40,9 +40,25 @@ resource "aws_security_group" "sg_central" {
   }
 
   ingress {
-    description = "Puerto de aplicacion 8080"
+    description = "Puerto de aplicacion 8080 (Plataforma Central / Reportes)"
     from_port   = 8080
     to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "RabbitMQ AMQP desde las VPCs de las bodegas (10.0.0.0/8)"
+    from_port   = 5672
+    to_port     = 5672
+    protocol    = "tcp"
+    cidr_blocks = ["10.0.0.0/8"]
+  }
+
+  ingress {
+    description = "RabbitMQ Management Dashboard Web (http://IP:15672)"
+    from_port   = 15672
+    to_port     = 15672
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
