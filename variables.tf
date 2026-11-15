@@ -19,7 +19,7 @@ variable "key_name" {
 variable "repo_url" {
   description = "URL del repositorio Git que clonarán las bodegas"
   type        = string
-  default     = "https://github.com/SebastianReyesLeyton/cloud-computing.git"
+  default     = "https://github.com/benjamin94773/WareHouse.git"
 }
 
 # ==============================================================================
