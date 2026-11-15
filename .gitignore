@@ -27,3 +27,7 @@ plans/
 # Compressed archives
 *.zip
 *.tar.gz
+
+# Python bytecode
+__pycache__/
+*.pyc

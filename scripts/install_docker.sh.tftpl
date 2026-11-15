@@ -43,6 +43,26 @@ if [ -n "$REPO" ] && [ -n "$TARGET_USER" ]; then
     mkdir -p "$APP_DIR"
     git clone "$REPO" "$APP_DIR" || (cd "$APP_DIR" && git pull)
     chown -R "$TARGET_USER:$TARGET_USER" "$APP_DIR"
+
+    # 4. Iniciar automáticamente la aplicación con Docker Compose
+    if [ -d "$APP_DIR/app" ]; then
+        echo "=== INICIANDO CONTENEDORES CON DOCKER COMPOSE ==="
+        cd "$APP_DIR/app"
+        
+        # Iniciar Docker si no estuviera corriendo
+        systemctl start docker || true
+        
+        # Ejecutar docker compose en segundo plano construyendo imágenes
+        if docker compose version >/dev/null 2>&1; then
+            docker compose up -d --build
+        else
+            docker-compose up -d --build
+        fi
+        
+        # Asegurar permisos para el usuario
+        chown -R "$TARGET_USER:$TARGET_USER" "$APP_DIR" || true
+        echo "=== CONTENEDORES INICIADOS Y DISPONIBLES EXITOSAMENTE ==="
+    fi
 fi
 
 echo "============================================="

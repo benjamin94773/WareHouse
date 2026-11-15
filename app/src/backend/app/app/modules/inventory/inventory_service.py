@@ -26,7 +26,9 @@ class InventoryService:
             # 1. Obtener balance actual bloqueando la fila de manera atómica (Lock pesimista)
             inventory = self.repo.get_by_product_for_update(movement_in.product_id)
             if not inventory:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="El inventario no existe")
+                # Auto-inicializar registro de inventario si es el primer movimiento
+                inventory = self.repo.initialize_inventory(movement_in.product_id)
+                self.db.flush()
 
             new_qty = inventory.quantity
             new_reserved = inventory.reserved_quantity

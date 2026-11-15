@@ -124,17 +124,17 @@ resource "aws_security_group" "sg_bodegas" {
   }
 
   ingress {
-    description = "Puerto API contenedor 8000"
+    description = "Puertos de aplicaciones web, APIs y Plataforma Central (8000 a 8090)"
     from_port   = 8000
-    to_port     = 8000
+    to_port     = 8090
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
-    description = "Puerto API contenedor 8080"
-    from_port   = 8080
-    to_port     = 8080
+    description = "RabbitMQ Management Dashboard Web (http://IP:15672)"
+    from_port   = 15672
+    to_port     = 15672
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }

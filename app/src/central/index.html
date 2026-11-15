@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Warehouse Cloud Platform — Monitor Central & Outbox</title>
+    <style>
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: #1e293b;
+            --bg-hover: #334155;
+            --accent-blue: #38bdf8;
+            --accent-green: #22c55e;
+            --accent-orange: #f97316;
+            --accent-purple: #a855f7;
+            --accent-red: #ef4444;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 24px;
+        }
+
+        /* HEADER */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .header-title h1 {
+            font-size: 24px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-title p {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-top: 4px;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--accent-green);
+            padding: 6px 12px;
+            border-radius: 9999px;
+            font-size: 13px;
+            font-weight: 600;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .status-badge .dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--accent-green);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+
+        .btn-nav {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .btn-nav:hover {
+            background-color: var(--bg-hover);
+            border-color: var(--accent-blue);
+        }
+
+        /* GRID CARDS SUPERIORES */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .metric-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .metric-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--accent-blue);
+        }
+
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+        }
+
+        .metric-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .metric-header h3 {
+            font-size: 15px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .metric-header .badge-wh {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 6px;
+            background: rgba(56, 189, 248, 0.15);
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+
+        .metric-value {
+            font-size: 36px;
+            font-weight: 800;
+            color: #ffffff;
+            margin-bottom: 8px;
+        }
+
+        .metric-types {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+
+        .pill {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .pill.in { color: var(--accent-green); border-color: rgba(34, 197, 94, 0.3); }
+        .pill.out { color: var(--accent-orange); border-color: rgba(249, 115, 22, 0.3); }
+        .pill.res { color: var(--accent-blue); border-color: rgba(56, 189, 248, 0.3); }
+
+        .metric-footer {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 10px;
+        }
+
+        /* SECCIONES PRINCIPALES (2 COLUMNAS) */
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 1024px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .section-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .section-card h2 {
+            font-size: 18px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .section-card p.subtitle {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+        }
+
+        /* FORMULARIO SIMULADOR */
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+
+        select, input[type="text"], input[type="number"] {
+            width: 100%;
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        select:focus, input:focus {
+            border-color: var(--accent-blue);
+        }
+
+        .type-selector {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 6px;
+        }
+
+        .type-btn {
+            background-color: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            padding: 10px 4px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            text-align: center;
+            transition: all 0.2s;
+        }
+
+        .type-btn.active {
+            background-color: rgba(56, 189, 248, 0.2);
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+        }
+
+        .qty-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .btn-qty {
+            background: var(--bg-hover);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 10px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .btn-submit {
+            width: 100%;
+            background: linear-gradient(135deg, #0284c7, #2563eb);
+            color: #ffffff;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 12px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+            transition: opacity 0.2s, transform 0.1s;
+        }
+
+        .btn-submit:hover {
+            opacity: 0.95;
+            transform: translateY(-1px);
+        }
+
+        .btn-submit:active {
+            transform: translateY(0);
+        }
+
+        .alert-box {
+            margin-top: 14px;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            display: none;
+        }
+
+        .alert-box.success {
+            display: block;
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .alert-box.error {
+            display: block;
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-red);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        /* OUTBOX AUDIT */
+        .outbox-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .guide-box {
+            background: rgba(56, 189, 248, 0.08);
+            border-left: 4px solid var(--accent-blue);
+            padding: 12px 14px;
+            border-radius: 4px 8px 8px 4px;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--text-muted);
+            margin-top: 16px;
+        }
+
+        .guide-box strong {
+            color: var(--accent-blue);
+        }
+
+        /* TABLAS */
+        .table-wrapper {
+            max-height: 280px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        th {
+            background-color: var(--bg-secondary);
+            color: var(--text-muted);
+            font-weight: 600;
+            text-align: left;
+            padding: 10px 12px;
+            position: sticky;
+            top: 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(51, 65, 85, 0.5);
+            color: var(--text-main);
+        }
+
+        tr:hover td {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .badge-status {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .badge-status.SENT {
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--accent-green);
+        }
+
+        .badge-status.PENDING {
+            background: rgba(249, 115, 22, 0.2);
+            color: var(--accent-orange);
+            animation: pulse 1.5s infinite;
+        }
+
+        /* FEED STREAM INFERIOR */
+        .feed-section {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 24px;
+        }
+
+        .feed-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- HEADER SUPERIOR -->
+    <header>
+        <div class="header-title">
+            <h1>📦 Warehouse Cloud Platform</h1>
+            <p>Arquitectura Distribuida con Patrón Outbox, RabbitMQ Broker y Consolidación CQRS</p>
+        </div>
+        <div class="header-actions">
+            <div class="status-badge">
+                <span class="dot"></span>
+                <span id="rabbitmq-status">RabbitMQ Conectado</span>
+            </div>
+            <button class="btn-nav" onclick="resetMetrics()">🔄 Reiniciar Métricas</button>
+            <a href="/docs" target="_blank" class="btn-nav">📄 Swagger Docs</a>
+            <a href="javascript:void(0)" onclick="openRabbitMq()" class="btn-nav">🐰 Panel RabbitMQ (15672)</a>
+        </div>
+    </header>
+
+    <!-- TARJETAS CONSOLIDADAS POR SUCURSAL -->
+    <div class="metrics-grid">
+        <div class="metric-card">
+            <div class="metric-header">
+                <h3>Bodega 1 — Principal</h3>
+                <span class="badge-wh">WH-001</span>
+            </div>
+            <div class="metric-value" id="val-wh001">0</div>
+            <div class="metric-types" id="types-wh001">
+                <span class="pill in">RECEIPT: 0</span>
+                <span class="pill out">SHIPMENT: 0</span>
+            </div>
+            <div class="metric-footer" id="footer-wh001">Sin eventos aún</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-header">
+                <h3>Bodega 2 — Norte</h3>
+                <span class="badge-wh">WH-002</span>
+            </div>
+            <div class="metric-value" id="val-wh002">0</div>
+            <div class="metric-types" id="types-wh002">
+                <span class="pill in">RECEIPT: 0</span>
+                <span class="pill out">SHIPMENT: 0</span>
+            </div>
+            <div class="metric-footer" id="footer-wh002">Sin eventos aún</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-header">
+                <h3>Bodega 3 — Sur</h3>
+                <span class="badge-wh">WH-003</span>
+            </div>
+            <div class="metric-value" id="val-wh003">0</div>
+            <div class="metric-types" id="types-wh003">
+                <span class="pill in">RECEIPT: 0</span>
+                <span class="pill out">SHIPMENT: 0</span>
+            </div>
+            <div class="metric-footer" id="footer-wh003">Sin eventos aún</div>
+        </div>
+
+        <div class="metric-card">
+            <div class="metric-header">
+                <h3>Total Consolidado</h3>
+                <span class="badge-wh">NUBE CENTRAL</span>
+            </div>
+            <div class="metric-value" id="val-total" style="color: var(--accent-blue);">0</div>
+            <div class="metric-types">
+                <span class="pill" style="color: var(--accent-purple);">Eventos CQRS</span>
+                <span class="pill in">3 Nodos Activos</span>
+            </div>
+            <div class="metric-footer" id="footer-total">Actualizado en tiempo real</div>
+        </div>
+    </div>
+
+    <!-- CUERPO PRINCIPAL: SIMULADOR Y AUDITORÍA OUTBOX -->
+    <div class="main-layout">
+        <!-- SIMULADOR DE MOVIMIENTOS -->
+        <div class="section-card">
+            <h2>⚡ Registrar Movimiento de Inventario</h2>
+            <p class="subtitle">Prueba la emisión asíncrona de eventos haciendo clic sin tocar la terminal</p>
+
+            <form id="movement-form" onsubmit="handleSendMovement(event)">
+                <div class="form-group">
+                    <label>Bodega Destino</label>
+                    <select id="form-wh">
+                        <option value="WH-001">Bodega 1 (WH-001 — Principal)</option>
+                        <option value="WH-002">Bodega 2 (WH-002 — Norte)</option>
+                        <option value="WH-003">Bodega 3 (WH-003 — Sur)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Tipo de Operación</label>
+                    <div class="type-selector">
+                        <div class="type-btn active" data-type="RECEIPT" onclick="selectType('RECEIPT', this)">📥 RECEIPT (Entrada)</div>
+                        <div class="type-btn" data-type="SHIPMENT" onclick="selectType('SHIPMENT', this)">📤 SHIPMENT (Salida)</div>
+                        <div class="type-btn" data-type="RESERVATION" onclick="selectType('RESERVATION', this)">🔒 RESERVA</div>
+                        <div class="type-btn" data-type="RELEASE" onclick="selectType('RELEASE', this)">🔓 LIBERAR</div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Producto</label>
+                    <select id="form-product">
+                        <option value="101" data-name="Smart TV Samsung 4K 55">101 — Smart TV Samsung 4K 55"</option>
+                        <option value="102" data-name="Laptop Dell Inspiron 15">102 — Laptop Dell Inspiron 15"</option>
+                        <option value="103" data-name="Auriculares Sony WH-1000XM5">103 — Auriculares Sony WH-1000XM5</option>
+                        <option value="104" data-name="Monitor Gamer LG 27">104 — Monitor Gamer LG 27"</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Cantidad</label>
+                    <div class="qty-row">
+                        <input type="number" id="form-qty" min="1" value="25" required>
+                        <button type="button" class="btn-qty" onclick="setQty(10)">+10</button>
+                        <button type="button" class="btn-qty" onclick="setQty(25)">+25</button>
+                        <button type="button" class="btn-qty" onclick="setQty(50)">+50</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Referencia / Motivo</label>
+                    <input type="text" id="form-ref" value="Llegada lote proveedor AWS" required>
+                </div>
+
+                <button type="submit" class="btn-submit" id="btn-submit-move">
+                    <span>🚀 Registrar Movimiento en Bodega</span>
+                </button>
+
+                <div id="alert-move" class="alert-box"></div>
+            </form>
+        </div>
+
+        <!-- AUDITORÍA OUTBOX -->
+        <div class="section-card">
+            <h2>🛡️ Auditoría del Patrón Outbox</h2>
+            <p class="subtitle">Inspecciona la tabla local de PostgreSQL para verificar la garantía de entrega</p>
+
+            <div class="outbox-controls">
+                <select id="audit-wh" style="max-width: 200px;">
+                    <option value="WH-001">Bodega 1 (WH-001)</option>
+                    <option value="WH-002">Bodega 2 (WH-002)</option>
+                    <option value="WH-003">Bodega 3 (WH-003)</option>
+                </select>
+                <button class="btn-nav" style="background-color: var(--bg-hover);" onclick="loadOutboxAudit()">
+                    🔍 Consultar Outbox Local
+                </button>
+            </div>
+
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID Evento</th>
+                            <th>Tipo</th>
+                            <th>Estado Local</th>
+                            <th>Reintentos</th>
+                            <th>Registrado</th>
+                        </tr>
+                    </thead>
+                    <tbody id="outbox-tbody">
+                        <tr>
+                            <td colspan="5" style="text-align: center; color: var(--text-muted);">
+                                Presiona "Consultar Outbox Local" para cargar registros.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="guide-box">
+                <strong>🧪 Demostración de Tolerancia a Fallos:</strong><br>
+                Si RabbitMQ se apaga (<code>docker stop warehouse_broker</code>), puedes registrar movimientos en el formulario de la izquierda sin errores. Verás que quedan guardados en estado <strong>PENDING</strong> en la base de datos de la bodega. Al volver a encenderlo (<code>docker start warehouse_broker</code>), el Outbox Worker los vacía solos y pasan a <strong>SENT</strong>.
+            </div>
+        </div>
+    </div>
+
+    <!-- FEED STREAM INFERIOR EN VIVO -->
+    <div class="feed-section">
+        <div class="feed-header">
+            <div>
+                <h2>📡 Feed de Eventos RabbitMQ en Tiempo Real</h2>
+                <p class="subtitle">Mensajes recibidos asíncronamente por el Consumidor Central (Auto-actualizado cada 2s)</p>
+            </div>
+            <span class="badge-wh" id="feed-count">0 Eventos</span>
+        </div>
+
+        <div class="table-wrapper" style="max-height: 350px;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Hora de Recepción</th>
+                        <th>ID del Evento</th>
+                        <th>Sucursal Emisora</th>
+                        <th>Operación</th>
+                        <th>Producto ID</th>
+                        <th>Cantidad</th>
+                        <th>Referencia</th>
+                        <th>Canal</th>
+                    </tr>
+                </thead>
+                <tbody id="feed-tbody">
+                    <tr>
+                        <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px;">
+                            Esperando eventos en la cola de RabbitMQ...
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- SCRIPT DE INTERACTIVIDAD Y AUTO-REFRESCO -->
+    <script>
+        let currentType = "RECEIPT";
+
+        function selectType(type, element) {
+            currentType = type;
+            document.querySelectorAll('.type-btn').forEach(btn => btn.classList.remove('active'));
+            element.classList.add('active');
+
+            // Sugerir referencia según el tipo
+            const refInput = document.getElementById('form-ref');
+            if (type === 'RECEIPT') refInput.value = 'Llegada lote proveedor AWS';
+            else if (type === 'SHIPMENT') refInput.value = 'Venta orden #AW-4081';
+            else if (type === 'RESERVATION') refInput.value = 'Reserva pedido web';
+            else if (type === 'RELEASE') refInput.value = 'Cancelación de reserva';
+        }
+
+        function setQty(val) {
+            const input = document.getElementById('form-qty');
+            input.value = parseInt(input.value || 0) + val;
+        }
+
+        function openRabbitMq() {
+            const host = window.location.hostname || 'localhost';
+            window.open(`http://${host}:15672`, '_blank');
+        }
+
+        // REGISTRAR MOVIMIENTO
+        async function handleSendMovement(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btn-submit-move');
+            const alertBox = document.getElementById('alert-move');
+            const wh = document.getElementById('form-wh').value;
+            const productSelect = document.getElementById('form-product');
+            const productId = parseInt(productSelect.value);
+            const productName = productSelect.options[productSelect.selectedIndex].getAttribute('data-name');
+            const qty = parseInt(document.getElementById('form-qty').value);
+            const ref = document.getElementById('form-ref').value;
+
+            btn.disabled = true;
+            btn.innerHTML = '<span>⏳ Procesando en nodo...</span>';
+            alertBox.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/simulate-movement', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        warehouse_id: wh,
+                        product_id: productId,
+                        product_name: productName,
+                        movement_type: currentType,
+                        quantity: qty,
+                        reference: ref
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.status === 'success') {
+                    alertBox.className = 'alert-box success';
+                    alertBox.innerHTML = `✅ <strong>${wh}:</strong> Movimiento <strong>${currentType}</strong> de ${qty} unidad(es) registrado con éxito. Publicado a RabbitMQ.`;
+                    // Refrescar auditoría de esa bodega si está seleccionada
+                    if (document.getElementById('audit-wh').value === wh) {
+                        loadOutboxAudit();
+                    }
+                    fetchReports();
+                } else {
+                    alertBox.className = 'alert-box error';
+                    alertBox.innerHTML = `⚠️ Error: ${data.message || 'No se pudo procesar la transacción'}`;
+                }
+            } catch (err) {
+                alertBox.className = 'alert-box error';
+                alertBox.innerHTML = `❌ Error de conexión: ${err.message}`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>🚀 Registrar Movimiento en Bodega</span>';
+            }
+        }
+
+        // AUDITORÍA OUTBOX
+        async function loadOutboxAudit() {
+            const wh = document.getElementById('audit-wh').value;
+            const tbody = document.getElementById('outbox-tbody');
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Consultando PostgreSQL local...</td></tr>';
+
+            try {
+                const res = await fetch(`/api/warehouse-audit/${wh}`);
+                const data = await res.json();
+
+                if (data.status === 'success' && data.outbox_events.length > 0) {
+                    tbody.innerHTML = data.outbox_events.map(ev => `
+                        <tr>
+                            <td style="font-family: monospace; font-size: 11px;">${ev.id.substring(0, 8)}...</td>
+                            <td><strong>${ev.event_type}</strong></td>
+                            <td><span class="badge-status ${ev.status}">${ev.status}</span></td>
+                            <td>${ev.retry_count}</td>
+                            <td style="color: var(--text-muted); font-size: 11px;">${ev.created_at ? ev.created_at.replace('T', ' ').substring(0, 19) : '-'}</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No hay eventos en la tabla outbox de ${wh}</td></tr>`;
+                }
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--accent-red);">Error al consultar auditoría: ${err.message}</td></tr>`;
+            }
+        }
+
+        // REINICIAR MÉTRICAS
+        async function resetMetrics() {
+            if (!confirm('¿Deseas reiniciar los contadores de eventos a cero?')) return;
+            await fetch('/reports/reset', { method: 'POST' });
+            fetchReports();
+        }
+
+        // AUTO-ACTUALIZACIÓN EN TIEMPO REAL
+        async function fetchReports() {
+            try {
+                // 1. Métricas consolidadas
+                const resSummary = await fetch('/reports/events-by-warehouse');
+                const dataSummary = await resSummary.json();
+
+                const whs = dataSummary.warehouses_summary || {};
+                document.getElementById('val-total').innerText = dataSummary.total_events_received || 0;
+
+                ['WH-001', 'WH-002', 'WH-003'].forEach(wh => {
+                    const id = wh.toLowerCase().replace('-', '');
+                    const whData = whs[wh] || { total_events: 0, by_type: {}, last_event_at: null };
+                    document.getElementById(`val-${id}`).innerText = whData.total_events;
+
+                    const typesContainer = document.getElementById(`types-${id}`);
+                    const typesHtml = Object.entries(whData.by_type || {}).map(([t, count]) => {
+                        let cls = 'pill';
+                        if (t.includes('IN') || t === 'RECEIPT') cls += ' in';
+                        else if (t.includes('OUT') || t === 'SHIPMENT') cls += ' out';
+                        else cls += ' res';
+                        return `<span class="${cls}">${t}: ${count}</span>`;
+                    }).join('');
+
+                    typesContainer.innerHTML = typesHtml || '<span class="pill" style="color: var(--text-muted);">Sin movimientos</span>';
+
+                    const footer = document.getElementById(`footer-${id}`);
+                    if (whData.last_event_at) {
+                        const time = whData.last_event_at.replace('T', ' ').substring(11, 19);
+                        footer.innerText = `Último evento a las ${time} UTC`;
+                    } else {
+                        footer.innerText = 'En espera de primer evento';
+                    }
+                });
+
+                // 2. Feed de eventos recientes
+                const resEvents = await fetch('/reports/events?limit=25');
+                const dataEvents = await resEvents.json();
+                const feedBody = document.getElementById('feed-tbody');
+                document.getElementById('feed-count').innerText = `${dataEvents.total_records || 0} Eventos`;
+
+                if (dataEvents.events && dataEvents.events.length > 0) {
+                    feedBody.innerHTML = dataEvents.events.map(ev => {
+                        let typeColor = 'var(--accent-blue)';
+                        if (ev.event_type === 'RECEIPT') typeColor = 'var(--accent-green)';
+                        else if (ev.event_type === 'SHIPMENT') typeColor = 'var(--accent-orange)';
+
+                        const time = (ev.received_at || ev.timestamp || '').replace('T', ' ').substring(11, 19);
+                        const shortId = (ev.event_id || '').substring(0, 8);
+
+                        return `
+                            <tr>
+                                <td style="color: var(--text-muted); font-size: 11px;">${time} UTC</td>
+                                <td style="font-family: monospace; font-size: 11px;">${shortId}...</td>
+                                <td><span class="badge-wh">${ev.warehouse_id}</span></td>
+                                <td><strong style="color: ${typeColor};">${ev.event_type}</strong></td>
+                                <td>#${ev.product_id || '-'}</td>
+                                <td><strong>${ev.quantity || '-'}</strong></td>
+                                <td style="color: var(--text-muted); font-size: 12px;">${ev.reference || '-'}</td>
+                                <td><span class="badge-status SENT">RabbitMQ AMQP</span></td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            } catch (e) {
+                console.error("Error actualizando métricas:", e);
+            }
+        }
+
+        // Iniciar polling
+        fetchReports();
+        setInterval(fetchReports, 2000);
+    </script>
+</body>
+</html>
