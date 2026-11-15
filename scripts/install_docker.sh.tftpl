@@ -5,29 +5,44 @@ echo "============================================="
 echo "=== INICIANDO PROVISIONAMIENTO DE BODEGA ==="
 echo "============================================="
 
-# 1. Actualización de paquetes
-dnf update -y
+# Detectar gestor de paquetes (Ubuntu vs Amazon Linux)
+if command -v apt-get >/dev/null 2>&1; then
+    echo "=== Sistema detectado: Ubuntu / Debian ==="
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y
+    apt-get install -y docker.io docker-compose-v2 git curl
+    systemctl enable --now docker
+    TARGET_USER="ubuntu"
+    [ -d "/home/ec2-user" ] && TARGET_USER="ec2-user"
+elif command -v dnf >/dev/null 2>&1; then
+    echo "=== Sistema detectado: Amazon Linux / RHEL ==="
+    dnf update -y
+    dnf install -y docker git curl
+    systemctl enable --now docker
+    TARGET_USER="ec2-user"
+fi
 
-# 2. Instalación de Docker, Git y Docker Compose
-dnf install -y docker git
+# 1. Configurar permisos de Docker para el usuario
+if [ -n "$TARGET_USER" ] && id "$TARGET_USER" >/dev/null 2>&1; then
+    usermod -aG docker "$TARGET_USER" || true
+fi
+
+# 2. Asegurar que docker-compose esté disponible
 mkdir -p /usr/local/lib/docker/cli-plugins
-curl -SL https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose
-chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-ln -s /usr/local/lib/docker/cli-plugins/docker-compose /usr/bin/docker-compose || true
+if [ ! -f /usr/local/lib/docker/cli-plugins/docker-compose ]; then
+    curl -SL https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+    ln -sf /usr/local/lib/docker/cli-plugins/docker-compose /usr/bin/docker-compose || true
+fi
 
-# 3. Habilitar e iniciar servicio Docker
-systemctl enable --now docker
-
-# 4. Dar permisos al usuario ec2-user para usar Docker sin sudo
-usermod -aG docker ec2-user
-
-# 5. Clonado del repositorio de la aplicación si se especificó repo_url
+# 3. Clonado del repositorio de la aplicación
 REPO="${repo_url}"
-if [ -n "$REPO" ]; then
-  echo "=== CLONANDO REPOSITORIO DE BODEGA: $REPO ==="
-  mkdir -p /home/ec2-user/app
-  git clone "$REPO" /home/ec2-user/app
-  chown -R ec2-user:ec2-user /home/ec2-user/app
+APP_DIR="/home/$TARGET_USER/app"
+if [ -n "$REPO" ] && [ -n "$TARGET_USER" ]; then
+    echo "=== CLONANDO REPOSITORIO DE BODEGA: $REPO ==="
+    mkdir -p "$APP_DIR"
+    git clone "$REPO" "$APP_DIR" || (cd "$APP_DIR" && git pull)
+    chown -R "$TARGET_USER:$TARGET_USER" "$APP_DIR"
 fi
 
 echo "============================================="

@@ -11,9 +11,9 @@ output "bodegas_ips" {
 }
 
 output "ssh_commands" {
-  description = "Comandos listos para conectarse por SSH a cada bodega"
+  description = "Comandos listos para conectarse por SSH a cada bodega (usuario ubuntu)"
   value = {
-    for name, instance in module.ec2_bodegas : name => "ssh -i vockey.pem ec2-user@${instance.public_ip}"
+    for name, instance in module.ec2_bodegas : name => "ssh -i labsuser.pem ubuntu@${instance.public_ip}"
   }
 }
 
