@@ -1,0 +1,31 @@
+#!/bin/bash
+exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+
+echo "============================================="
+echo "=== INICIANDO PROVISIONAMIENTO DE BODEGA ==="
+echo "============================================="
+
+# 1. Actualización de paquetes
+dnf update -y
+
+# 2. Instalación de Docker y Git
+dnf install -y docker git
+
+# 3. Habilitar e iniciar servicio Docker
+systemctl enable --now docker
+
+# 4. Dar permisos al usuario ec2-user para usar Docker sin sudo
+usermod -aG docker ec2-user
+
+# 5. Clonado del repositorio de la aplicación si se especificó repo_url
+REPO="${repo_url}"
+if [ -n "$REPO" ]; then
+  echo "=== CLONANDO REPOSITORIO DE BODEGA: $REPO ==="
+  mkdir -p /home/ec2-user/app
+  git clone "$REPO" /home/ec2-user/app
+  chown -R ec2-user:ec2-user /home/ec2-user/app
+fi
+
+echo "============================================="
+echo "=== PROVISIONAMIENTO COMPLETADO CON ÉXITO ==="
+echo "============================================="

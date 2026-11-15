@@ -1,0 +1,29 @@
+# Terraform local cache & providers
+.terraform/
+.terraform.lock.hcl
+
+# Terraform state files (contienen datos sensibles de la infraestructura)
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Sensitive variables
+*.secret.tfvars
+
+# Execution plans
+*.tfplan
+plans/
+
+# SSH Keys and secrets
+*.pem
+*.key
+*.id_rsa
+.env
+
+# Compressed archives
+*.zip
+*.tar.gz
