@@ -5,6 +5,16 @@ echo "============================================="
 echo "=== INICIANDO PROVISIONAMIENTO DE BODEGA ==="
 echo "============================================="
 
+# 0. Configurar 2GB de Swap (Crucial para instancias t3.micro con 1GB de RAM)
+if [ ! -f /swapfile ]; then
+    echo "=== Configurando 2GB de memoria Swap ==="
+    fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
+fi
+
 # Detectar gestor de paquetes (Ubuntu vs Amazon Linux)
 if command -v apt-get >/dev/null 2>&1; then
     echo "=== Sistema detectado: Ubuntu / Debian ==="
