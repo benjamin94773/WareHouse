@@ -50,6 +50,11 @@ resource "aws_route_table" "public" {
   tags = {
     Name = "${var.name}-public-rt"
   }
+
+  # Las rutas de peering se agregan con aws_route en main.tf; sin esto, cada apply las borra.
+  lifecycle {
+    ignore_changes = [route]
+  }
 }
 
 resource "aws_route_table_association" "public" {
