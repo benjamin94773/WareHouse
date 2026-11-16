@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS inventory_movements (
     type         VARCHAR NOT NULL,  -- RECEIPT, SHIPMENT, ADJUSTMENT, RESERVATION, RELEASE, TRANSFER_OUT, TRANSFER_IN, RETURN
     quantity     INTEGER NOT NULL,
     reference    VARCHAR,
+    idempotency_key VARCHAR UNIQUE,  -- reintentos de la Saga no duplican el movimiento
     created_at   TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_inventory_movements_product_id ON inventory_movements (product_id);

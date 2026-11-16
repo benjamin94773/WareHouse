@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY shared ./shared
 COPY backend/app/app ./app
 COPY backend/app/main.py main.py
+COPY backend/app/db ./db
 
 EXPOSE 8000
 

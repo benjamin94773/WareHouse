@@ -1,7 +1,9 @@
 import json
 import uuid
+from typing import Optional
 
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app import cache
 from app.config import settings
@@ -31,7 +33,12 @@ class InventoryService:
         cache.set_json(key, data)
         return data, False
 
-    def process_movement(self, movement_in: MovementCreate):
+    def process_movement(self, movement_in: MovementCreate, idempotency_key: Optional[str] = None):
+        """Devuelve (movimiento, creado). Con un Idempotency-Key ya usado devuelve el original sin reaplicarlo."""
+        if idempotency_key:
+            existing = self.repo.get_movement_by_key(idempotency_key)
+            if existing:
+                return existing, False
         try:
             # 1. Bloqueo pesimista de la fila: dos salidas concurrentes se serializan aquí
             inventory = self.repo.get_by_product_for_update(movement_in.product_id)
@@ -47,10 +54,15 @@ class InventoryService:
             # 2. Reglas de negocio: quantity = disponible, reserved_quantity = retenido
             if m_type in ("RECEIPT", "TRANSFER_IN", "RETURN"):
                 new_qty += qty
-            elif m_type in ("SHIPMENT", "TRANSFER_OUT"):
+            elif m_type == "SHIPMENT":
                 if new_qty < qty:
                     raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Stock insuficiente. Disponible: {new_qty}, Requerido: {qty}")
                 new_qty -= qty
+            elif m_type == "TRANSFER_OUT":
+                # Paso final de la Saga en origen: sale lo que se había reservado
+                if new_reserved < qty:
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, f"TRANSFER_OUT requiere reserva previa. Reservado: {new_reserved}, Requerido: {qty}")
+                new_reserved -= qty
             elif m_type == "ADJUSTMENT":
                 if new_qty + qty < 0:
                     raise HTTPException(status.HTTP_400_BAD_REQUEST, f"El ajuste dejaría el inventario negativo ({new_qty} {qty:+d})")
@@ -68,7 +80,7 @@ class InventoryService:
 
             # 3. Aplicar mutación y registrar movimiento
             self.repo.update_stock(inventory, new_qty, new_reserved)
-            movement = self.repo.register_movement(movement_in.product_id, m_type, qty, movement_in.reference)
+            movement = self.repo.register_movement(movement_in.product_id, m_type, qty, movement_in.reference, idempotency_key)
 
             # 4. Transactional Outbox: el evento se guarda en la MISMA transacción.
             # Contrato versionado (docs/eventos.md); balance completo para que la proyección sea idempotente.
@@ -101,7 +113,14 @@ class InventoryService:
             self.db.commit()
             # Invalidación síncrona después del commit: la próxima lectura trae el valor nuevo
             cache.delete(cache.inventory_key(movement_in.product_id))
-            return movement
+            return movement, True
+        except IntegrityError:
+            # Dos requests concurrentes con la misma clave: gana el primero, el segundo devuelve ese movimiento
+            self.db.rollback()
+            existing = idempotency_key and self.repo.get_movement_by_key(idempotency_key)
+            if existing:
+                return existing, False
+            raise
         except Exception:
             # ROLLBACK: inventario, movimiento y evento se descartan juntos
             self.db.rollback()
@@ -109,3 +128,9 @@ class InventoryService:
 
     def get_movements(self, product_id: int):
         return self.repo.get_movements_by_product(product_id)
+
+    def get_movement_by_key(self, key: str):
+        movement = self.repo.get_movement_by_key(key)
+        if not movement:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No existe un movimiento con ese Idempotency-Key")
+        return movement

@@ -28,6 +28,8 @@ class InventoryMovementEntity(Base):
     type = Column(String, nullable=False)
     quantity = Column(Integer, nullable=False)
     reference = Column(String)
+    # Idempotencia: el mismo Idempotency-Key nunca aplica dos veces el movimiento (p. ej. pasos de la Saga)
+    idempotency_key = Column(String, unique=True, nullable=True)
     created_at = Column(DateTime(timezone=True), default=schemas_utils.current_utc_time)
 
 

@@ -57,3 +57,22 @@ def test_contrato_del_evento(client, product):
     assert ev["source"] == "warehouse-WH-TEST" and ev["correlation_id"].startswith("COR-")
     p = ev["payload"]
     assert (p["sku"], p["movement_type"], p["quantity"], p["reserved_quantity"]) == ("P-001", "RESERVATION", 3, 2)
+
+
+def test_idempotency_key_no_duplica_el_movimiento(client, product):
+    body = {"product_id": product["id"], "type": "RECEIPT", "quantity": 5}
+    r1 = client.post("/inventory/movements", json=body, headers={"Idempotency-Key": "TR-1:in"})
+    r2 = client.post("/inventory/movements", json=body, headers={"Idempotency-Key": "TR-1:in"})
+    assert (r1.status_code, r2.status_code) == (201, 200) and r1.json()["id"] == r2.json()["id"]
+    assert stock(client, product["id"])["quantity"] == 5
+    assert client.get("/inventory/movements/by-key/TR-1:in").status_code == 200
+    assert client.get("/inventory/movements/by-key/otra").status_code == 404
+
+
+def test_transfer_out_consume_lo_reservado(client, product):
+    move(client, product["id"], "RECEIPT", 10)
+    assert move(client, product["id"], "TRANSFER_OUT", 3).status_code == 400  # sin reserva
+    move(client, product["id"], "RESERVATION", 3)
+    assert move(client, product["id"], "TRANSFER_OUT", 3).status_code == 201
+    s = stock(client, product["id"])
+    assert (s["quantity"], s["reserved_quantity"]) == (7, 0)

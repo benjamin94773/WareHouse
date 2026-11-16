@@ -1,4 +1,8 @@
+import glob
+import os
+
 from fastapi import FastAPI
+from sqlalchemy import text
 
 from shared.observability import install, setup_logging
 
@@ -10,6 +14,19 @@ from app.modules.inventory.inventory_controller import router as inventory_contr
 from app.modules.products.products_controller import router as products_controller  # noqa: E402
 
 Base.metadata.create_all(bind=engine)
+
+
+def run_migrations():
+    """Aplica db/migrations/*.sql en orden; cada script es idempotente (IF NOT EXISTS)."""
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as conn:
+        conn.execute(text("SELECT pg_advisory_xact_lock(42)"))  # las réplicas arrancan a la vez
+        for path in sorted(glob.glob(os.path.join(os.path.dirname(__file__), "db", "migrations", "*.sql"))):
+            conn.exec_driver_sql(open(path).read())
+
+
+run_migrations()
 
 app = FastAPI(
     title="Warehouse Cloud Platform — Bodega",

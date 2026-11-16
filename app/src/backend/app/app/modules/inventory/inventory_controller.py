@@ -1,6 +1,6 @@
 import json
-from typing import List
-from fastapi import APIRouter, Depends, Response, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, Header, Response, status
 from app.database import get_db
 from sqlalchemy.orm import Session
 from app.modules.inventory.schemas import MovementCreate, MovementResponse, InventoryResponse
@@ -16,9 +16,17 @@ def get_inventory(product_id: int, response: Response, db: Session = Depends(get
     return data
 
 @router.post("/movements", response_model=MovementResponse, status_code=status.HTTP_201_CREATED)
-def create_movement(payload: MovementCreate, db: Session = Depends(get_db)):
-    service = InventoryService(db)
-    return service.process_movement(payload)
+def create_movement(payload: MovementCreate, response: Response, db: Session = Depends(get_db),
+                    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key")):
+    movement, created = InventoryService(db).process_movement(payload, idempotency_key)
+    if not created:
+        response.status_code = status.HTTP_200_OK  # repetición: no se reaplicó
+    return movement
+
+
+@router.get("/movements/by-key/{key}", response_model=MovementResponse)
+def get_movement_by_key(key: str, db: Session = Depends(get_db)):
+    return InventoryService(db).get_movement_by_key(key)
 
 @router.get("/{product_id}/movements", response_model=List[MovementResponse])
 def get_movements(product_id: int, db: Session = Depends(get_db)):

@@ -34,13 +34,15 @@ class InventoryRepository:
         inventory.reserved_quantity = reserved_quantity
         self.db.add(inventory)
 
-    def register_movement(self, product_id: int, m_type: str, qty: int, ref: Optional[str]) -> InventoryMovementEntity:
+    def register_movement(self, product_id: int, m_type: str, qty: int, ref: Optional[str],
+                          idempotency_key: Optional[str] = None) -> InventoryMovementEntity:
         movement = InventoryMovementEntity(
             product_id=product_id,
             warehouse_id=settings.WAREHOUSE_ID,
             type=m_type,
             quantity=qty,
-            reference=ref
+            reference=ref,
+            idempotency_key=idempotency_key,
         )
         self.db.add(movement)
         return movement
@@ -66,3 +68,6 @@ class InventoryRepository:
         )
         self.db.add(event)
         return event
+
+    def get_movement_by_key(self, key: str) -> Optional[InventoryMovementEntity]:
+        return self.db.query(InventoryMovementEntity).filter(InventoryMovementEntity.idempotency_key == key).first()
