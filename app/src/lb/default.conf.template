@@ -1,11 +1,14 @@
 # Load balancer de la bodega: reparte /api/* entre las réplicas de la API y sirve el frontend.
 # Docker resuelve "api" a la IP de cada réplica, y Nginx las usa en round-robin.
-# "resolve" vuelve a consultar el DNS de Docker: si se escala o se recrea una réplica
-# (nueva IP), el LB la incorpora sin reiniciarse.
+# "resolve" vuelve a consultar el DNS de Docker cada 5 s: una réplica detenida o caída sale
+# del pool y una nueva (al escalar o recrear) entra, sin reiniciar Nginx.
+# max_fails=0: sin expulsión pasiva por conteo. Nginx OSS cuenta igual un timeout de conexión
+# (réplica caída) que uno de lectura (réplica sobrecargada); en la prueba de carga eso
+# desactivó las 3 réplicas a la vez y todo respondía "no live upstreams".
 upstream api_pool {
     zone api_pool 64k;
     resolver 127.0.0.11 valid=5s ipv6=off;
-    server ${API_TARGET} resolve max_fails=2 fail_timeout=10s;  # health check pasivo
+    server ${API_TARGET} resolve max_fails=0;
     keepalive 32;
 }
 
@@ -23,9 +26,11 @@ server {
         proxy_set_header Connection "";
         proxy_set_header X-Correlation-ID $http_x_correlation_id;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        # Si una réplica cae o devuelve 502/503, el request se reintenta en otra
-        proxy_next_upstream error timeout http_502 http_503;
-        proxy_connect_timeout 2s;
+        # Réplica caída (error o timeout de conexión, 502): se reintenta en otra. El límite de
+        # 3 s evita reintentar un request lento por sobrecarga, que duplicaría la carga.
+        proxy_next_upstream error timeout http_502;
+        proxy_next_upstream_timeout 3s;
+        proxy_connect_timeout 1s;
         proxy_read_timeout 15s;
         add_header X-Upstream $upstream_addr always;  # muestra qué réplica atendió
     }
