@@ -8,7 +8,6 @@ from app.database import Base, engine  # noqa: E402
 from app.modules.health.health_controller import router as health_controller  # noqa: E402
 from app.modules.inventory.inventory_controller import router as inventory_controller  # noqa: E402
 from app.modules.products.products_controller import router as products_controller  # noqa: E402
-from app.outbox_worker import outbox_worker  # noqa: E402
 
 Base.metadata.create_all(bind=engine)
 
@@ -23,7 +22,3 @@ app.include_router(health_controller)
 app.include_router(products_controller)
 app.include_router(inventory_controller)
 
-
-@app.on_event("startup")
-def startup_event():
-    outbox_worker.start_background()

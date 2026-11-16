@@ -1,10 +1,12 @@
-import uuid
 import json
-from datetime import datetime
+import uuid
+
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app import cache
 from app.config import settings
+from app.modules.products.models import ProductEntity
+from shared.observability import correlation_id, new_correlation_id, utc_now_iso
 from app.modules.inventory.schemas import InventoryResponse, MovementCreate
 from app.modules.inventory.inventory_repository import InventoryRepository
 
@@ -68,26 +70,32 @@ class InventoryService:
             self.repo.update_stock(inventory, new_qty, new_reserved)
             movement = self.repo.register_movement(movement_in.product_id, m_type, qty, movement_in.reference)
 
-            # 4. PATRÓN TRANSACTIONAL OUTBOX:
-            # Registrar el evento en la misma transacción ACID de PostgreSQL.
-            # Si el broker RabbitMQ está caído, este evento permanece seguro en la base de datos local.
+            # 4. Transactional Outbox: el evento se guarda en la MISMA transacción.
+            # Contrato versionado (docs/eventos.md); balance completo para que la proyección sea idempotente.
+            self.db.flush()  # asigna movement.id, usado como versión monótona del inventario
+            product = self.db.get(ProductEntity, movement_in.product_id)
             event_id = str(uuid.uuid4())
-            event_payload = {
+            event = {
                 "event_id": event_id,
-                "warehouse_id": settings.WAREHOUSE_ID,
-                "event_type": m_type,
-                "product_id": movement_in.product_id,
-                "quantity": qty,
-                "reference": movement_in.reference,
-                "balance_after": new_qty,
-                "timestamp": datetime.utcnow().isoformat()
+                "event_type": "INVENTORY_UPDATED",
+                "event_version": 1,
+                "occurred_at": utc_now_iso(),
+                "correlation_id": correlation_id.get() or new_correlation_id(),
+                "source": f"warehouse-{settings.WAREHOUSE_ID}",
+                "payload": {
+                    "warehouse_id": settings.WAREHOUSE_ID,
+                    "product_id": movement_in.product_id,
+                    "sku": product.sku,
+                    "product_name": product.name,
+                    "movement_id": movement.id,
+                    "movement_type": m_type,
+                    "movement_quantity": qty,
+                    "reference": movement_in.reference,
+                    "quantity": new_qty,
+                    "reserved_quantity": new_reserved,
+                },
             }
-
-            self.repo.register_outbox_event(
-                event_id=event_id,
-                event_type=m_type,
-                payload_str=json.dumps(event_payload)
-            )
+            self.repo.register_outbox_event(event_id, "INVENTORY_UPDATED", json.dumps(event))
 
             # 5. Confirmación atómica de ambas operaciones
             self.db.commit()
@@ -101,6 +109,3 @@ class InventoryService:
 
     def get_movements(self, product_id: int):
         return self.repo.get_movements_by_product(product_id)
-
-    def get_outbox_events(self, limit: int = 50):
-        return self.repo.get_pending_outbox_events(limit)

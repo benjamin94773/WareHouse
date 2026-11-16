@@ -47,3 +47,13 @@ def test_movimiento_genera_evento_en_outbox(client, product):
     move(client, product["id"], "RECEIPT", 3)
     events = client.get("/inventory/outbox/audit").json()
     assert len(events) == 1 and events[0]["status"] == "PENDING"
+
+
+def test_contrato_del_evento(client, product):
+    move(client, product["id"], "RECEIPT", 5)
+    move(client, product["id"], "RESERVATION", 2)
+    ev = client.get("/inventory/outbox/audit").json()[0]["payload"]  # el más reciente
+    assert ev["event_type"] == "INVENTORY_UPDATED" and ev["event_version"] == 1
+    assert ev["source"] == "warehouse-WH-TEST" and ev["correlation_id"].startswith("COR-")
+    p = ev["payload"]
+    assert (p["sku"], p["movement_type"], p["quantity"], p["reserved_quantity"]) == ("P-001", "RESERVATION", 3, 2)

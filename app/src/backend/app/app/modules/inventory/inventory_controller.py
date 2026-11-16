@@ -1,3 +1,4 @@
+import json
 from typing import List
 from fastapi import APIRouter, Depends, Response, status
 from app.database import get_db
@@ -36,7 +37,8 @@ def get_outbox_audit(limit: int = 50, db: Session = Depends(get_db)):
             "status": e.status,
             "retry_count": e.retry_count,
             "created_at": e.created_at.isoformat() if e.created_at else None,
-            "sent_at": e.sent_at.isoformat() if e.sent_at else None
+            "sent_at": e.sent_at.isoformat() if e.sent_at else None,
+            "payload": json.loads(e.payload),
         }
         for e in events
     ]

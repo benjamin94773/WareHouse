@@ -1,9 +1,7 @@
 from typing import List, Optional
-import datetime
 from app.config import settings
 from sqlalchemy.orm import Session
 from app.modules.inventory.models import InventoryEntity, InventoryMovementEntity, OutboxEventEntity
-from app.modules.shared.utils import schemas_utils
 
 class InventoryRepository:
     def __init__(self, db: Session):
@@ -68,23 +66,3 @@ class InventoryRepository:
         )
         self.db.add(event)
         return event
-
-    def get_pending_outbox_events(self, limit: int = 50) -> List[OutboxEventEntity]:
-        return self.db.query(OutboxEventEntity).filter(
-            OutboxEventEntity.status == "PENDING"
-        ).order_by(OutboxEventEntity.created_at.asc()).limit(limit).all()
-
-    def mark_outbox_event_sent(self, event_id: str) -> None:
-        event = self.db.query(OutboxEventEntity).filter(OutboxEventEntity.id == event_id).first()
-        if event:
-            event.status = "SENT"
-            event.sent_at = schemas_utils.current_utc_time()
-            self.db.add(event)
-            self.db.commit()
-
-    def increment_outbox_retry(self, event_id: str) -> None:
-        event = self.db.query(OutboxEventEntity).filter(OutboxEventEntity.id == event_id).first()
-        if event:
-            event.retry_count += 1
-            self.db.add(event)
-            self.db.commit()
