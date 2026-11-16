@@ -1,5 +1,5 @@
 from typing import List
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from app.database import get_db
 from sqlalchemy.orm import Session
 from app.modules.inventory.schemas import MovementCreate, MovementResponse, InventoryResponse
@@ -9,9 +9,10 @@ from app.modules.inventory.models import OutboxEventEntity
 router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
 @router.get("/{product_id}", response_model=InventoryResponse)
-def get_inventory(product_id: int, db: Session = Depends(get_db)):
-    service = InventoryService(db)
-    return service.get_stock(product_id)
+def get_inventory(product_id: int, response: Response, db: Session = Depends(get_db)):
+    data, hit = InventoryService(db).get_stock(product_id)
+    response.headers["X-Cache"] = "HIT" if hit else "MISS"  # visible en curl -i y en las pruebas de carga
+    return data
 
 @router.post("/movements", response_model=MovementResponse, status_code=status.HTTP_201_CREATED)
 def create_movement(payload: MovementCreate, db: Session = Depends(get_db)):

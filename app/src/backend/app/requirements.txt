@@ -5,3 +5,4 @@ psycopg2-binary==2.9.13
 pydantic==2.14.3
 pydantic-settings==2.16.3
 pika==1.4.4
+redis==8.1.0

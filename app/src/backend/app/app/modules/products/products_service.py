@@ -1,6 +1,7 @@
 from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from app import cache
 from app.modules.inventory.inventory_service import InventoryService
 from app.modules.products.products_repository import ProductRepository
 from app.modules.products.schemas import ProductCreate, ProductUpdate
@@ -55,3 +56,4 @@ class ProductService:
             self.db.delete(inventory)
         self.db.delete(product)
         self.db.commit()
+        cache.delete(cache.inventory_key(product_id))

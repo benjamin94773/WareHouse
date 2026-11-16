@@ -3,8 +3,9 @@ import json
 from datetime import datetime
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from app import cache
 from app.config import settings
-from app.modules.inventory.schemas import MovementCreate
+from app.modules.inventory.schemas import InventoryResponse, MovementCreate
 from app.modules.inventory.inventory_repository import InventoryRepository
 
 class InventoryService:
@@ -16,10 +17,17 @@ class InventoryService:
         self.repo.initialize_inventory(product_id)
 
     def get_stock(self, product_id: int):
+        """Cache Aside: Redis -> (miss) PostgreSQL -> Redis. Devuelve (datos, hit)."""
+        key = cache.inventory_key(product_id)
+        cached = cache.get_json(key)
+        if cached:
+            return cached, True
         inventory = self.repo.get_by_product(product_id)
         if not inventory:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventario no encontrado")
-        return inventory
+        data = InventoryResponse.model_validate(inventory).model_dump(mode="json")
+        cache.set_json(key, data)
+        return data, False
 
     def process_movement(self, movement_in: MovementCreate):
         try:
@@ -83,6 +91,8 @@ class InventoryService:
 
             # 5. Confirmación atómica de ambas operaciones
             self.db.commit()
+            # Invalidación síncrona después del commit: la próxima lectura trae el valor nuevo
+            cache.delete(cache.inventory_key(movement_in.product_id))
             return movement
         except Exception:
             # ROLLBACK: inventario, movimiento y evento se descartan juntos

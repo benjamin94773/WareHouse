@@ -11,6 +11,11 @@ class Settings(BaseSettings):
     RABBITMQ_PASS: str = "guest"
     RABBITMQ_QUEUE: str = "warehouse_events"
 
+    # Redis (Cache Aside). CACHE_ENABLED=false permite medir "Redis OFF" en las pruebas de carga
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CACHE_ENABLED: bool = True
+    CACHE_TTL_SECONDS: int = 30
+
     class Config:
         env_file = ".env"
 
