@@ -15,7 +15,7 @@ provider "aws" {
 }
 
 # ==============================================================================
-# 1. RED CENTRAL (VPC 10.0.0.0/16) Y CLUSTER ECS
+# 1. RED CENTRAL (VPC 10.0.0.0/16) Y EC2 DE LA PLATAFORMA CENTRAL
 # ==============================================================================
 
 module "vpc_central" {
@@ -28,19 +28,19 @@ module "vpc_central" {
 
 resource "aws_security_group" "sg_central" {
   name        = "secgroup-central"
-  description = "Security Group para Bodega Central (ECS y RabbitMQ Broker)"
+  description = "Security Group para Bodega Central (API central, RabbitMQ y read model)"
   vpc_id      = module.vpc_central.vpc_id
 
   ingress {
-    description = "HTTP desde cualquier lugar"
-    from_port   = 80
-    to_port     = 80
+    description = "SSH para administracion"
+    from_port   = 22
+    to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   ingress {
-    description = "Puerto de aplicacion 8080 (Plataforma Central / Reportes)"
+    description = "API central y dashboard (http://IP:8080)"
     from_port   = 8080
     to_port     = 8080
     protocol    = "tcp"
@@ -48,7 +48,7 @@ resource "aws_security_group" "sg_central" {
   }
 
   ingress {
-    description = "RabbitMQ AMQP desde las VPCs de las bodegas (10.0.0.0/8)"
+    description = "RabbitMQ AMQP solo desde las VPCs de las bodegas y la central"
     from_port   = 5672
     to_port     = 5672
     protocol    = "tcp"
@@ -56,7 +56,7 @@ resource "aws_security_group" "sg_central" {
   }
 
   ingress {
-    description = "RabbitMQ Management Dashboard Web (http://IP:15672)"
+    description = "RabbitMQ Management (http://IP:15672)"
     from_port   = 15672
     to_port     = 15672
     protocol    = "tcp"
@@ -76,9 +76,17 @@ resource "aws_security_group" "sg_central" {
   }
 }
 
-module "ecs_central" {
-  source       = "./modules/ecs"
-  cluster_name = "bodega-central-cluster"
+# EC2 de la plataforma central: RabbitMQ, API central, workers y read model (PostgreSQL)
+module "ec2_central" {
+  source                 = "./modules/ec2"
+  instance_name          = "central"
+  ami_id                 = var.ami_id
+  instance_type          = var.instance_type
+  key_name               = var.key_name
+  subnet_id              = module.vpc_central.public_subnet_id
+  vpc_security_group_ids = [aws_security_group.sg_central.id]
+  iam_instance_profile   = var.instance_profile
+  user_data              = templatefile("${path.module}/scripts/install_docker.sh.tftpl", { role = "central" })
 }
 
 # ==============================================================================
@@ -116,28 +124,14 @@ resource "aws_security_group" "sg_bodegas" {
   }
 
   ingress {
-    description = "HTTP web"
+    description = "Load balancer Nginx de la bodega (API y frontend)"
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  ingress {
-    description = "Puertos de aplicaciones web, APIs y Plataforma Central (8000 a 8090)"
-    from_port   = 8000
-    to_port     = 8090
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
-  ingress {
-    description = "RabbitMQ Management Dashboard Web (http://IP:15672)"
-    from_port   = 15672
-    to_port     = 15672
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
 
   ingress {
     description = "Trafico entrante exclusivo desde Bodega Central (10.0.0.0/16)"
@@ -148,7 +142,7 @@ resource "aws_security_group" "sg_bodegas" {
   }
 
   egress {
-    description = "Salida total a Internet para descargar Docker y clonar repo"
+    description = "Salida a Internet para descargar paquetes e imagenes Docker"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -195,7 +189,7 @@ resource "aws_route" "bodegas_to_central" {
 # ==============================================================================
 # 5. INSTANCIAS EC2 DE LAS BODEGAS (CREADAS CON FOR_EACH)
 # Recorre los nombres del mapa (wh-001, wh-002, wh-003) y les asigna su subnet,
-# security group y el script de User Data (Ajustes avanzados) con Docker y Git.
+# security group y el script de User Data que instala Docker.
 # ==============================================================================
 
 module "ec2_bodegas" {
@@ -207,5 +201,26 @@ module "ec2_bodegas" {
   key_name               = var.key_name
   subnet_id              = module.vpc_bodegas[each.key].public_subnet_id
   vpc_security_group_ids = [aws_security_group.sg_bodegas[each.key].id]
-  user_data              = templatefile("${path.module}/scripts/install_docker.sh.tftpl", { repo_url = var.repo_url })
+  instance_type          = var.instance_type
+  iam_instance_profile   = var.instance_profile
+  user_data              = templatefile("${path.module}/scripts/install_docker.sh.tftpl", { role = each.key })
+}
+
+# ==============================================================================
+# 6. ALMACENAMIENTO HISTÓRICO (S3) PARA REPORTES Y SNAPSHOTS DEL BATCH
+# ==============================================================================
+
+data "aws_caller_identity" "current" {}
+
+resource "aws_s3_bucket" "platform" {
+  bucket        = "warehouse-platform-${data.aws_caller_identity.current.account_id}"
+  force_destroy = true # el lab se recrea a menudo; permite destroy con objetos dentro
+}
+
+resource "aws_s3_bucket_public_access_block" "platform" {
+  bucket                  = aws_s3_bucket.platform.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }

@@ -13,16 +13,22 @@ output "bodegas_ips" {
 output "ssh_commands" {
   description = "Comandos listos para conectarse por SSH a cada bodega (usuario ubuntu)"
   value = {
-    for name, instance in module.ec2_bodegas : name => "ssh -i labsuser.pem ubuntu@${instance.public_ip}"
+    for name, instance in merge(module.ec2_bodegas, { central = module.ec2_central }) : name => "ssh -i labsuser.pem ubuntu@${instance.public_ip}"
   }
 }
 
-output "ecs_central_cluster" {
-  description = "Datos del Cluster ECS de la Bodega Central"
+output "central" {
+  description = "IPs de la EC2 central (API central en :8080, RabbitMQ en :15672)"
   value = {
-    name = module.ecs_central.cluster_name
-    arn  = module.ecs_central.cluster_arn
+    id         = module.ec2_central.instance_id
+    public_ip  = module.ec2_central.public_ip
+    private_ip = module.ec2_central.private_ip
   }
+}
+
+output "s3_bucket" {
+  description = "Bucket S3 para reportes y snapshots del batch"
+  value       = aws_s3_bucket.platform.bucket
 }
 
 output "vpc_central" {

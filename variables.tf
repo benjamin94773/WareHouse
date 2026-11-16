@@ -5,7 +5,7 @@ variable "aws_region" {
 }
 
 variable "ami_id" {
-  description = "AMI ID para las instancias EC2 de las bodegas (Amazon Linux 2023)"
+  description = "AMI ID para las instancias EC2 de las bodegas (Ubuntu Server 24.04, us-east-1)"
   type        = string
   default     = "ami-0d97d7f07b25dd693"
 }
@@ -16,10 +16,16 @@ variable "key_name" {
   default     = "vockey"
 }
 
-variable "repo_url" {
-  description = "URL del repositorio Git que clonarán las bodegas"
+variable "instance_type" {
+  description = "Tipo de instancia para la central y las bodegas (t3.small = 2 GB de RAM)"
   type        = string
-  default     = "https://github.com/benjamin94773/WareHouse.git"
+  default     = "t3.small"
+}
+
+variable "instance_profile" {
+  description = "Instance profile de AWS Academy con acceso a S3 (rol LabRole)"
+  type        = string
+  default     = "LabInstanceProfile"
 }
 
 # ==============================================================================

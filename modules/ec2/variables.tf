@@ -1,7 +1,7 @@
 variable "instance_type" {
   description = "Tipo de instancia para el servidor EC2"
   type        = string
-  default     = "t3.micro"
+  default     = "t3.small"
 }
 
 variable "ami_id" {
@@ -35,4 +35,16 @@ variable "user_data" {
   description = "Script de User Data para aprovisionamiento"
   type        = string
   default     = null
+}
+
+variable "iam_instance_profile" {
+  description = "Instance profile con permisos AWS (en AWS Academy: LabInstanceProfile)"
+  type        = string
+  default     = null
+}
+
+variable "volume_size" {
+  description = "Tamaño del disco raíz en GB"
+  type        = number
+  default     = 20
 }
