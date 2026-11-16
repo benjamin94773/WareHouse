@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
   }
 }
 
@@ -239,4 +243,68 @@ resource "aws_cloudformation_stack" "platform_bucket" {
     }
     Outputs = { BucketName = { Value = { Ref = "Bucket" } } }
   })
+}
+
+# ==============================================================================
+# 7. LAMBDA: VALIDA CADA REPORTE QUE EL BATCH ESCRIBE EN reports/ (S3 ObjectCreated)
+# ==============================================================================
+
+# En AWS Academy no se pueden crear roles IAM; se usa el LabRole existente
+data "aws_iam_role" "lab" {
+  name = "LabRole"
+}
+
+data "archive_file" "report_validator" {
+  type        = "zip"
+  source_file = "${path.module}/lambda/report_validator/handler.py"
+  output_path = "${path.module}/.build/report_validator.zip"
+}
+
+resource "aws_lambda_function" "report_validator" {
+  function_name    = "warehouse-report-validator"
+  role             = data.aws_iam_role.lab.arn
+  runtime          = "python3.13"
+  handler          = "handler.lambda_handler"
+  filename         = data.archive_file.report_validator.output_path
+  source_code_hash = data.archive_file.report_validator.output_base64sha256
+  timeout          = 15
+
+  environment {
+    variables = {
+      CENTRAL_URL = "http://${module.ec2_central.public_ip}:8080"
+    }
+  }
+}
+
+# S3 -> EventBridge -> Lambda. La notificación directa S3 -> Lambda no entrega eventos en el
+# Learner Lab; EventBridge sí, y además permite filtrar por prefijo con un patrón.
+resource "aws_s3_bucket_notification" "reports" {
+  bucket      = aws_cloudformation_stack.platform_bucket.outputs["BucketName"]
+  eventbridge = true
+}
+
+resource "aws_cloudwatch_event_rule" "report_created" {
+  name        = "warehouse-report-created"
+  description = "Objeto .json creado en reports/ del bucket de la plataforma"
+  event_pattern = jsonencode({
+    source      = ["aws.s3"]
+    detail-type = ["Object Created"]
+    detail = {
+      bucket = { name = [local.bucket_name] }
+      object = { key = [{ wildcard = "reports/*.json" }] }
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_target" "report_validator" {
+  rule = aws_cloudwatch_event_rule.report_created.name
+  arn  = aws_lambda_function.report_validator.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.report_validator.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.report_created.arn
 }

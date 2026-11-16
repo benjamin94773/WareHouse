@@ -43,3 +43,6 @@ project/*
 
 # Secretos generados por scripts/deploy.sh
 .deploy.env
+
+# Artefactos de build de Terraform (zip de la Lambda)
+.build/

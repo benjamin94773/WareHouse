@@ -38,3 +38,8 @@ output "vpc_central" {
     cidr_block = module.vpc_central.vpc_cidr_block
   }
 }
+
+output "lambda_report_validator" {
+  description = "Lambda que valida los reportes del batch (logs en CloudWatch)"
+  value       = aws_lambda_function.report_validator.function_name
+}
