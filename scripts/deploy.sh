@@ -49,6 +49,9 @@ TARGET=${1:-all}
 if [[ $TARGET == all || $TARGET == central ]]; then
   # La central va primero: declara las colas a las que publican las bodegas
   deploy central "$CENTRAL_PUBLIC" docker-compose.central.yml "$(printf 'WAREHOUSES=%s\nS3_BUCKET=%s' "$WAREHOUSE_URLS" "$BUCKET")"
+  # Batch diario a las 23:00 UTC (reporte + snapshots en S3); log en ~/batch.log
+  ssh "${SSH_OPTS[@]}" "ubuntu@$CENTRAL_PUBLIC" "(crontab -l 2>/dev/null | grep -v batch.py; \
+    echo '0 23 * * * cd /home/ubuntu/app && docker compose -f docker-compose.central.yml exec -T central_worker python batch.py >> /home/ubuntu/batch.log 2>&1') | crontab -"
 fi
 if [[ $TARGET == all ]]; then
   for wh in $(tf "' '.join(sorted(o['bodegas_ips']['value']))"); do deploy_warehouse "$wh" & done

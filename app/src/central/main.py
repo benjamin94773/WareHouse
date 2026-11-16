@@ -19,8 +19,9 @@ from shared.observability import correlation_id, install, log, setup_logging
 
 setup_logging()
 
+import reports  # noqa: E402
 import warehouses  # noqa: E402
-from db import Base, EventLog, InventoryView, Transfer, WarehouseStatus, aware, engine, get_db, now, session_scope  # noqa: E402
+from db import Base, EventLog, IntegrationEvent, InventoryView, ReportJob, Transfer, WarehouseStatus, aware, engine, get_db, now, session_scope  # noqa: E402
 from shared import messaging  # noqa: E402
 
 logger = logging.getLogger("central_api")
@@ -207,6 +208,55 @@ def redeliver_transfer(transfer_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, "Transferencia no encontrada")
     publish_command("transfer", {"transfer_id": transfer_id})
     return {"transfer_id": transfer_id, "redelivered": True}
+
+
+# ==============================================================================
+# Reportes asíncronos (Fase 3) generados por el batch hacia S3 (Fase 8)
+# ==============================================================================
+class ReportRequest(BaseModel):
+    type: Literal["daily"] = "daily"
+    date: Optional[str] = Field(None, description="AAAA-MM-DD; por defecto hoy (UTC)")
+
+
+@app.post("/reports", status_code=202)
+def request_report(req: ReportRequest):
+    try:
+        job_id = reports.create_job(req.date or now().date().isoformat(), trigger="api")
+    except ValueError:
+        raise HTTPException(422, "date debe tener formato AAAA-MM-DD")
+    try:
+        publish_command("report", {"job_id": job_id})
+    except Exception as e:
+        reports.on_report_dead({"job_id": job_id}, f"broker no disponible: {e}")
+        raise HTTPException(503, f"RabbitMQ no disponible; job {job_id} rechazado")
+    return {"job_id": job_id, "status": "PROCESSING"}
+
+
+@app.get("/reports/jobs")
+def list_jobs(limit: int = 20, db: Session = Depends(get_db)):
+    return db.query(ReportJob).order_by(ReportJob.created_at.desc()).limit(limit).all()
+
+
+@app.get("/reports/jobs/{job_id}")
+def get_job(job_id: str, db: Session = Depends(get_db)):
+    job = db.get(ReportJob, job_id)
+    if not job:
+        raise HTTPException(404, "Job no encontrado")
+    return job
+
+
+@app.post("/integrations/lambda-events", status_code=201)
+def lambda_event(payload: Dict[str, Any], db: Session = Depends(get_db)):
+    """La Lambda de S3 publica aquí el resultado de validar cada reporte."""
+    db.add(IntegrationEvent(source="lambda:report-validator", payload=payload))
+    db.commit()
+    log(logger, "lambda_event_received", key=payload.get("key"), valid=payload.get("valid"))
+    return {"received": True}
+
+
+@app.get("/integrations/lambda-events")
+def list_lambda_events(limit: int = 20, db: Session = Depends(get_db)):
+    return db.query(IntegrationEvent).order_by(IntegrationEvent.id.desc()).limit(limit).all()
 
 
 # ==============================================================================

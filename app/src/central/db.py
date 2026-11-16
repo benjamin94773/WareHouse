@@ -83,6 +83,29 @@ class Transfer(Base):
     updated_at = Column(DateTime(timezone=True), default=now, onupdate=now)
 
 
+class ReportJob(Base):
+    """Jobs asíncronos de reportes y registro de ejecuciones del batch (reejecutable)."""
+    __tablename__ = "report_jobs"
+    id = Column(String, primary_key=True)
+    type = Column(String, nullable=False)
+    report_date = Column(String, nullable=False)  # YYYY-MM-DD
+    trigger = Column(String, nullable=False)  # api | cli
+    status = Column(String, nullable=False)  # PROCESSING | COMPLETED | FAILED
+    result = Column(JSON)
+    error = Column(Text)
+    created_at = Column(DateTime(timezone=True), default=now)
+    finished_at = Column(DateTime(timezone=True))
+
+
+class IntegrationEvent(Base):
+    """Eventos recibidos desde integraciones externas (p. ej. la Lambda de S3)."""
+    __tablename__ = "integration_events"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source = Column(String, nullable=False)
+    payload = Column(JSON)
+    received_at = Column(DateTime(timezone=True), default=now)
+
+
 @contextmanager
 def session_scope():
     db = SessionLocal()
