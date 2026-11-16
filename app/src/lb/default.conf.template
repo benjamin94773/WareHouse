@@ -1,7 +1,11 @@
 # Load balancer de la bodega: reparte /api/* entre las réplicas de la API y sirve el frontend.
 # Docker resuelve "api" a la IP de cada réplica, y Nginx las usa en round-robin.
+# "resolve" vuelve a consultar el DNS de Docker: si se escala o se recrea una réplica
+# (nueva IP), el LB la incorpora sin reiniciarse.
 upstream api_pool {
-    server ${API_TARGET} max_fails=2 fail_timeout=10s;  # health check pasivo
+    zone api_pool 64k;
+    resolver 127.0.0.11 valid=5s ipv6=off;
+    server ${API_TARGET} resolve max_fails=2 fail_timeout=10s;  # health check pasivo
     keepalive 32;
 }
 

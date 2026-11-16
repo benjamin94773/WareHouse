@@ -1,4 +1,4 @@
-FROM nginx:1.25-alpine
+FROM nginx:1.27-alpine
 
 # Copiar archivos estáticos directos al directorio web de Nginx
 COPY ./index.html /usr/share/nginx/html/index.html
