@@ -1,272 +1,285 @@
-import os
-import time
+"""API de la plataforma central: consultas globales (read model), estado de bodegas y administración."""
 import json
 import logging
+import os
 import threading
-import urllib.request
-import urllib.error
-from datetime import datetime
-from typing import Dict, Any, List
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
-from fastapi.middleware.cors import CORSMiddleware
+import time
+from datetime import timedelta
+from typing import Any, Dict
+
 import pika
-from pika.exceptions import AMQPConnectionError, AMQPChannelError
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] Central: %(message)s")
-logger = logging.getLogger("CentralPlatform")
+from shared.observability import install, log, setup_logging
 
-RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "rabbitmq")
-RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT", 5672))
-RABBITMQ_USER = os.getenv("RABBITMQ_USER", "guest")
-RABBITMQ_PASS = os.getenv("RABBITMQ_PASS", "guest")
-RABBITMQ_QUEUE = os.getenv("RABBITMQ_QUEUE", "warehouse_events")
+setup_logging()
 
+import warehouses  # noqa: E402
+from db import Base, EventLog, InventoryView, WarehouseStatus, aware, engine, get_db, now, session_scope  # noqa: E402
+from shared import messaging  # noqa: E402
+
+logger = logging.getLogger("central_api")
+STALE_AFTER = timedelta(seconds=int(os.getenv("STALE_AFTER_SECONDS", "30")))
 INDEX_HTML_PATH = os.path.join(os.path.dirname(__file__), "index.html")
 
-# ==============================================================================
-# Almacén de Métricas y Eventos Consolidados (CQRS Read Model)
-# ==============================================================================
-lock = threading.Lock()
-processed_event_ids = set() # Idempotencia: evita procesar dos veces el mismo evento
-events_history: List[Dict[str, Any]] = []
+Base.metadata.create_all(bind=engine)
 
-summary_by_warehouse: Dict[str, Dict[str, Any]] = {
-    "WH-001": {"total_events": 0, "by_type": {}, "last_event_at": None},
-    "WH-002": {"total_events": 0, "by_type": {}, "last_event_at": None},
-    "WH-003": {"total_events": 0, "by_type": {}, "last_event_at": None},
-}
-
-def record_event(data: Dict[str, Any]):
-    event_id = data.get("event_id")
-    warehouse_id = data.get("warehouse_id", "UNKNOWN").upper().replace("_", "-")
-    event_type = data.get("event_type", "UNKNOWN")
-    timestamp = data.get("timestamp", datetime.utcnow().isoformat())
-
-    with lock:
-        # Control de Idempotencia
-        if event_id and event_id in processed_event_ids:
-            logger.info(f"🔁 [Idempotencia] Evento {event_id} ya fue procesado. Descartando duplicado.")
-            return
-
-        if event_id:
-            processed_event_ids.add(event_id)
-
-        # Inicializar bodega si no existía en el mapa
-        if warehouse_id not in summary_by_warehouse:
-            summary_by_warehouse[warehouse_id] = {"total_events": 0, "by_type": {}, "last_event_at": None}
-
-        # Actualizar métricas
-        wh_summary = summary_by_warehouse[warehouse_id]
-        wh_summary["total_events"] += 1
-        wh_summary["last_event_at"] = timestamp
-        wh_summary["by_type"][event_type] = wh_summary["by_type"].get(event_type, 0) + 1
-
-        events_history.append({
-            "received_at": datetime.utcnow().isoformat(),
-            **data
-        })
-
-    logger.info(f"📊 [Evento Registrado] Sucursal: {warehouse_id} | Tipo: {event_type} | Total Sucursal: {wh_summary['total_events']}")
-
-# ==============================================================================
-# Consumidor de RabbitMQ en Segundo Plano
-# ==============================================================================
-def rabbitmq_consumer():
-    logger.info("🚀 Iniciando Consumidor Central de RabbitMQ...")
-
-    while True:
-        try:
-            credentials = pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASS)
-            parameters = pika.ConnectionParameters(
-                host=RABBITMQ_HOST,
-                port=RABBITMQ_PORT,
-                credentials=credentials,
-                connection_attempts=1,
-                retry_delay=1,
-                socket_timeout=5
-            )
-            connection = pika.BlockingConnection(parameters)
-            channel = connection.channel()
-            channel.queue_declare(queue=RABBITMQ_QUEUE, durable=True)
-            channel.basic_qos(prefetch_count=10)
-
-            def on_message(ch, method, properties, body):
-                try:
-                    payload = json.loads(body.decode("utf-8"))
-                    record_event(payload)
-                    ch.basic_ack(delivery_tag=method.delivery_tag)
-                except Exception as parse_err:
-                    logger.error(f"❌ Error al procesar mensaje: {parse_err}")
-                    ch.basic_ack(delivery_tag=method.delivery_tag)
-
-            channel.basic_consume(queue=RABBITMQ_QUEUE, on_message_callback=on_message)
-            logger.info(f"🟢 [Consumidor Central] Conectado a RabbitMQ. Escuchando cola '{RABBITMQ_QUEUE}'...")
-            channel.start_consuming()
-
-        except (AMQPConnectionError, AMQPChannelError, Exception) as e:
-            logger.warning(f"⚠️ [Consumidor Central] RabbitMQ no disponible ({e}). Reintentando en 5s...")
-            time.sleep(5)
-
-# ==============================================================================
-# Helper HTTP para Comunicación con los Nodos de Bodega
-# ==============================================================================
-def get_warehouse_api_url(wh_id: str) -> str:
-    slug = wh_id.lower().replace("-", "")
-    return f"http://api_{slug}:8000"
-
-def http_get_json(url: str, timeout: int = 4):
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-def http_post_json(url: str, data: dict, timeout: int = 5):
-    payload_bytes = json.dumps(data).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=payload_bytes,
-        headers={"Content-Type": "application/json", "Accept": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-# ==============================================================================
-# API REST de la Plataforma Central y Reportes
-# ==============================================================================
 app = FastAPI(
-    title="Warehouse Cloud Platform — Plataforma Central y Reportería",
-    description="Consolidación de eventos CQRS y sistema de reportes por sucursal.",
-    version="1.3.0"
+    title="Warehouse Cloud Platform — Central",
+    description="Read model global (CQRS), sagas de transferencia, reportes y estado de bodegas.",
+    version="2.0.0",
 )
+install(app)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+# ==============================================================================
+# Health poller: detecta bodegas inaccesibles para marcar su información como desactualizada
+# ==============================================================================
+def poll_warehouses():
+    while True:
+        for wh in warehouses.warehouse_urls():
+            try:
+                warehouses.request(wh, "GET", "/health", timeout=2)
+                ok, error = True, None
+            except Exception as e:
+                ok, error = False, str(e)[:300]
+            try:
+                with session_scope() as db:
+                    st = db.get(WarehouseStatus, wh) or WarehouseStatus(warehouse_id=wh)
+                    if ok:
+                        st.last_health_ok_at = now()
+                    elif st.healthy:
+                        log(logger, "warehouse_unreachable", logging.WARNING, warehouse_id=wh, error=error)
+                    st.healthy, st.last_error = ok, error
+                    db.merge(st)
+            except Exception as e:
+                log(logger, "health_poll_error", logging.ERROR, error=str(e))
+        time.sleep(10)
+
 
 @app.on_event("startup")
-def startup_event():
-    thread = threading.Thread(target=rabbitmq_consumer, daemon=True, name="CentralConsumerThread")
-    thread.start()
+def startup():
+    threading.Thread(target=poll_warehouses, daemon=True, name="warehouse-health").start()
 
-@app.get("/", response_class=HTMLResponse)
-def get_dashboard():
-    """Sirve el Dashboard interactivo web con simulador y monitor Outbox en tiempo real."""
-    if os.path.exists(INDEX_HTML_PATH):
-        with open(INDEX_HTML_PATH, "r", encoding="utf-8") as f:
-            return f.read()
-    return "<h1>Warehouse Central Platform</h1><p>index.html no encontrado</p>"
 
+def warehouse_freshness(db: Session) -> Dict[str, dict]:
+    statuses = {s.warehouse_id: s for s in db.query(WarehouseStatus).all()}
+    result = {}
+    for wh in sorted(set(warehouses.warehouse_urls()) | set(statuses)):
+        st = statuses.get(wh)
+        last_ok = aware(st.last_health_ok_at) if st else None
+        stale = not (st and st.healthy and last_ok and now() - last_ok < STALE_AFTER)
+        result[wh] = {
+            "reachable": bool(st and st.healthy),
+            "stale": stale,
+            "last_health_ok_at": last_ok,
+            "last_event_at": aware(st.last_event_at) if st else None,
+            "last_error": st.last_error if st else "sin chequeos todavía",
+        }
+    return result
+
+
+# ==============================================================================
+# Consultas globales (Query side de CQRS)
+# ==============================================================================
 @app.get("/health")
 def health():
-    return {"status": "online", "service": "central-reporting-platform"}
+    return {"status": "ok", "service": "central-api"}
+
+
+@app.get("/warehouses/status")
+def warehouses_status(db: Session = Depends(get_db)):
+    return warehouse_freshness(db)
+
+
+@app.get("/global/inventory")
+def global_inventory(db: Session = Depends(get_db)):
+    rows = (db.query(InventoryView.sku, func.max(InventoryView.product_name),
+                     func.sum(InventoryView.quantity), func.sum(InventoryView.reserved_quantity))
+            .group_by(InventoryView.sku).order_by(InventoryView.sku).all())
+    return [{"sku": s, "name": n, "total_quantity": q, "total_reserved": r} for s, n, q, r in rows]
+
+
+@app.get("/global/inventory/{sku}")
+def global_inventory_by_sku(sku: str, db: Session = Depends(get_db)):
+    """Alternativa B (read model): una sola consulta local, sin depender de que las bodegas respondan."""
+    rows = db.query(InventoryView).filter(InventoryView.sku == sku).all()
+    if not rows:
+        raise HTTPException(404, f"Sin datos para el sku {sku} en el read model")
+    fresh = warehouse_freshness(db)
+    detail, warnings = [], []
+    for r in sorted(rows, key=lambda r: r.warehouse_id):
+        f = fresh.get(r.warehouse_id, {"stale": True, "reachable": False})
+        detail.append({"warehouse_id": r.warehouse_id, "quantity": r.quantity, "reserved_quantity": r.reserved_quantity,
+                       "last_updated_at": aware(r.updated_at), "stale": f["stale"], "reachable": f["reachable"]})
+        if f["stale"]:
+            warnings.append(f"{r.warehouse_id}: bodega inaccesible; su información puede estar desactualizada")
+    for wh in sorted(set(fresh) - {r.warehouse_id for r in rows}):
+        warnings.append(f"{wh}: sin eventos para este sku en el read model")
+    return {
+        "sku": sku,
+        "name": rows[0].product_name,
+        "total_quantity": sum(r.quantity for r in rows),
+        "total_reserved": sum(r.reserved_quantity for r in rows),
+        "consistency": "eventual",
+        "strategy": "read model (CQRS)",
+        "warehouses": detail,
+        "warnings": warnings,
+    }
+
+
+@app.get("/global/inventory/{sku}/live")
+def global_inventory_live(sku: str):
+    """Alternativa A, solo para comparar latencia y disponibilidad con el read model."""
+    return warehouses.live_inventory(sku)
+
+
+# ==============================================================================
+# Administración de RabbitMQ: profundidad de colas, DLQ y experimentos de fallos
+# ==============================================================================
+def _channel():
+    conn = pika.BlockingConnection(messaging.connection_params())
+    ch = conn.channel()
+    messaging.declare_topology(ch)
+    return conn, ch
+
+
+@app.get("/admin/queues")
+def queue_depths():
+    conn, ch = _channel()
+    try:
+        out = {}
+        for q in messaging.QUEUES:
+            for name in (q, f"{q}.dlq"):
+                d = ch.queue_declare(name, passive=True)
+                out[name] = {"messages": d.method.message_count, "consumers": d.method.consumer_count}
+        return out
+    finally:
+        conn.close()
+
+
+@app.post("/admin/dlq/{queue}/replay")
+def replay_dlq(queue: str):
+    """Recuperación: reinyecta los mensajes de <queue>.dlq en <queue> con el contador de reintentos en cero."""
+    if queue not in messaging.QUEUES:
+        raise HTTPException(404, f"Cola desconocida. Opciones: {list(messaging.QUEUES)}")
+    conn, ch = _channel()
+    moved = 0
+    try:
+        while True:
+            method, props, body = ch.basic_get(f"{queue}.dlq")
+            if method is None:
+                break
+            headers = {k: v for k, v in (props.headers or {}).items() if k not in ("x-retries", "x-death")}
+            ch.basic_publish("", queue, body, messaging.persistent(props.correlation_id, headers))
+            ch.basic_ack(method.delivery_tag)
+            moved += 1
+    finally:
+        conn.close()
+    return {"queue": queue, "replayed": moved}
+
+
+@app.post("/admin/inject/{kind}")
+def inject_message(kind: str, db: Session = Depends(get_db)):
+    """
+    Experimentos de la Fase 10:
+      duplicate      -> reenvía el último evento ya procesado (debe ignorarse)
+      invalid_json   -> mensaje corrupto (debe ir a la DLQ sin reintentos)
+      missing_fields -> evento sin sku (debe ir a la DLQ sin reintentos)
+    """
+    if kind == "duplicate":
+        last = db.query(EventLog).order_by(EventLog.received_at.desc()).first()
+        if not last:
+            raise HTTPException(409, "Aún no hay eventos procesados para duplicar")
+        body, key = json.dumps(last.payload), f"inventory.updated.{last.warehouse_id}"
+    elif kind == "invalid_json":
+        body, key = "{esto no es json", "inventory.updated.TEST"
+    elif kind == "missing_fields":
+        body, key = json.dumps({"event_id": "EVT-INVALIDO", "event_type": "INVENTORY_UPDATED", "payload": {}}), "inventory.updated.TEST"
+    else:
+        raise HTTPException(404, "kind debe ser duplicate, invalid_json o missing_fields")
+    conn, ch = _channel()
+    try:
+        ch.basic_publish(messaging.EVENTS_EXCHANGE, key, body.encode(), messaging.persistent())
+    finally:
+        conn.close()
+    return {"injected": kind}
+
+
+# ==============================================================================
+# Dashboard web (compatibilidad con index.html)
+# ==============================================================================
+@app.get("/", response_class=HTMLResponse)
+def dashboard():
+    with open(INDEX_HTML_PATH, encoding="utf-8") as f:
+        return f.read()
+
 
 @app.get("/reports/events-by-warehouse")
-def get_events_by_warehouse_report():
-    """
-    REQUERIMIENTO: Sistema de reportes: cuántos eventos llegan por sucursal.
-    Retorna el resumen consolidado de eventos recibidos por cada bodega.
-    """
-    with lock:
-        total_global = sum(wh["total_events"] for wh in summary_by_warehouse.values())
-        return {
-            "report_title": "Consolidado de Eventos Recibidos por Sucursal",
-            "generated_at": datetime.utcnow().isoformat(),
-            "total_events_received": total_global,
-            "warehouses_summary": summary_by_warehouse
-        }
+def events_by_warehouse(db: Session = Depends(get_db)):
+    summary = {wh: {"total_events": 0, "by_type": {}, "last_event_at": None} for wh in warehouses.warehouse_urls()}
+    for wh, mtype, count, last in (db.query(EventLog.warehouse_id, EventLog.movement_type, func.count(), func.max(EventLog.received_at))
+                                   .group_by(EventLog.warehouse_id, EventLog.movement_type).all()):
+        s = summary.setdefault(wh, {"total_events": 0, "by_type": {}, "last_event_at": None})
+        s["total_events"] += count
+        s["by_type"][mtype] = count
+        last = aware(last).isoformat()
+        s["last_event_at"] = max(filter(None, [s["last_event_at"], last]))
+    return {"generated_at": now().isoformat(),
+            "total_events_received": sum(s["total_events"] for s in summary.values()),
+            "warehouses_summary": summary}
+
 
 @app.get("/reports/events")
-def get_all_events(limit: int = 100):
-    """Retorna el registro detallado de los últimos eventos recibidos de las bodegas."""
-    with lock:
-        return {
-            "total_records": len(events_history),
-            "events": list(reversed(events_history[-limit:]))
-        }
+def recent_events(limit: int = 100, db: Session = Depends(get_db)):
+    rows = db.query(EventLog).order_by(EventLog.received_at.desc()).limit(limit).all()
+    return {
+        "total_records": db.query(func.count(EventLog.event_id)).scalar(),
+        "events": [{"event_id": e.event_id, "warehouse_id": e.warehouse_id, "event_type": e.movement_type,
+                    "product_id": e.sku, "quantity": e.movement_quantity, "reference": e.reference,
+                    "correlation_id": e.correlation_id, "received_at": aware(e.received_at).isoformat()} for e in rows],
+    }
+
 
 @app.post("/reports/reset")
-def reset_metrics():
-    """Reinicia los contadores para demostraciones en vivo."""
-    with lock:
-        processed_event_ids.clear()
-        events_history.clear()
-        for wh in summary_by_warehouse:
-            summary_by_warehouse[wh] = {"total_events": 0, "by_type": {}, "last_event_at": None}
-    return {"status": "ok", "message": "Métricas de eventos reiniciadas"}
+def reset_feed(db: Session = Depends(get_db)):
+    """Vacía el feed del dashboard. No toca el read model ni la tabla de idempotencia."""
+    db.query(EventLog).delete()
+    db.commit()
+    return {"status": "ok"}
+
 
 @app.post("/api/simulate-movement")
 def simulate_movement(payload: Dict[str, Any]):
-    """
-    Registra un movimiento de inventario en una bodega desde la interfaz gráfica.
-    Asegura existencia previa del producto en la base de datos local de la bodega.
-    """
-    wh_id = payload.get("warehouse_id", "WH-001").upper()
-    product_id = int(payload.get("product_id", 101))
-    product_name = payload.get("product_name", f"Producto {product_id}")
-    movement_type = payload.get("movement_type", "RECEIPT").upper()
-    quantity = int(payload.get("quantity", 10))
-    reference = payload.get("reference", "Operación Web UI")
-
-    base_url = get_warehouse_api_url(wh_id)
-
-    # 1. Asegurar existencia del producto en la bodega
+    """Formulario del dashboard: crea el producto (sku P-<id>) si no existe y registra el movimiento."""
+    wh = payload.get("warehouse_id", "WH-001").upper()
+    pid = int(payload.get("product_id", 101))
+    sku = f"P-{pid:03d}"
     try:
-        http_get_json(f"{base_url}/products/{product_id}", timeout=3)
-    except Exception:
         try:
-            prod_data = {
-                "sku": f"SKU-{wh_id}-{product_id}",
-                "name": product_name,
-                "category": "General",
-                "unit": "UNIDADES",
-                "description": "Producto inicializado desde panel web"
-            }
-            http_post_json(f"{base_url}/products", prod_data, timeout=3)
-        except Exception as pe:
-            logger.warning(f"Aviso al inicializar producto {product_id} en {wh_id}: {pe}")
-
-    # 2. Registrar el movimiento
-    move_payload = {
-        "product_id": product_id,
-        "type": movement_type,
-        "quantity": quantity,
-        "reference": reference
-    }
-
-    try:
-        result = http_post_json(f"{base_url}/inventory/movements", move_payload, timeout=6)
-        return {
-            "status": "success",
-            "message": f"Movimiento {movement_type} de {quantity} unidades registrado en {wh_id}",
-            "data": result
-        }
-    except urllib.error.HTTPError as he:
-        body = he.read().decode("utf-8")
-        logger.error(f"Error de negocio en {wh_id}: {body}")
-        return {"status": "error", "message": f"Error en bodega {wh_id}: {body}"}
+            _, product = warehouses.request(wh, "GET", f"/products/by-sku/{sku}")
+        except warehouses.WarehouseError as e:
+            if e.status != 404:
+                raise
+            _, product = warehouses.request(wh, "POST", "/products", {
+                "sku": sku, "name": payload.get("product_name") or f"Producto {pid}", "unit": "UNIDAD", "category": "General"})
+        _, result = warehouses.request(wh, "POST", "/inventory/movements", {
+            "product_id": product["id"], "type": payload.get("movement_type", "RECEIPT").upper(),
+            "quantity": int(payload.get("quantity", 10)), "reference": payload.get("reference")})
+        return {"status": "success", "data": result}
+    except warehouses.WarehouseError as e:
+        return {"status": "error", "message": f"Error en bodega {wh}: {e.body}"}
     except Exception as e:
-        logger.error(f"Error comunicando con {wh_id}: {e}")
-        return {"status": "error", "message": f"No se pudo conectar con nodo {wh_id} ({e})"}
+        return {"status": "error", "message": f"No se pudo conectar con {wh} ({e})"}
+
 
 @app.get("/api/warehouse-audit/{warehouse_id}")
-def get_warehouse_outbox_audit(warehouse_id: str):
-    """Consulta la tabla outbox_events de PostgreSQL en la bodega solicitada."""
-    base_url = get_warehouse_api_url(warehouse_id)
+def warehouse_audit(warehouse_id: str):
     try:
-        events = http_get_json(f"{base_url}/inventory/outbox/audit?limit=25", timeout=4)
-        return {
-            "status": "success",
-            "warehouse_id": warehouse_id,
-            "outbox_events": events
-        }
+        _, events = warehouses.request(warehouse_id, "GET", "/inventory/outbox/audit?limit=25", timeout=4)
+        return {"status": "success", "warehouse_id": warehouse_id, "outbox_events": events}
     except Exception as e:
-        return {
-            "status": "error",
-            "warehouse_id": warehouse_id,
-            "outbox_events": [],
-            "error": str(e)
-        }
+        return {"status": "error", "warehouse_id": warehouse_id, "outbox_events": [], "error": str(e)}

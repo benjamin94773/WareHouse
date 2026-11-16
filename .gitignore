@@ -39,4 +39,4 @@ project/*
 .DS_Store
 
 # Base SQLite de las pruebas
-test.db
+*test.db
