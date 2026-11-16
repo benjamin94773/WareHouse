@@ -37,3 +37,10 @@ def test_reporte_de_eventos_por_bodega():
     project_inventory_event(event("E1", wh="WH-001"))
     r = client.get("/reports/events-by-warehouse").json()
     assert r["warehouses_summary"]["WH-001"]["by_type"] == {"RECEIPT": 1}
+
+
+def test_metrics_sin_rabbitmq_no_falla():
+    project_inventory_event(event("E1"))
+    m = client.get("/metrics").json()
+    assert m["workers"]["projection"]["processed_total"] == 1
+    assert "error" in m["rabbitmq"]

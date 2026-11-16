@@ -15,13 +15,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from shared.observability import correlation_id, install, log, setup_logging
+from shared.observability import correlation_id, install, log, metrics, setup_logging
 
 setup_logging()
 
 import reports  # noqa: E402
 import warehouses  # noqa: E402
-from db import Base, EventLog, IntegrationEvent, InventoryView, ReportJob, Transfer, WarehouseStatus, aware, engine, get_db, now, session_scope  # noqa: E402
+from db import Base, EventLog, IntegrationEvent, InventoryView, ProcessedEvent, ReportJob, Transfer, WarehouseStatus, aware, engine, get_db, now, session_scope  # noqa: E402
 from shared import messaging  # noqa: E402
 
 logger = logging.getLogger("central_api")
@@ -91,6 +91,29 @@ def warehouse_freshness(db: Session) -> Dict[str, dict]:
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "central-api"}
+
+
+@app.get("/metrics")
+def central_metrics(db: Session = Depends(get_db)):
+    """API central + RabbitMQ (profundidad, DLQ) + workers (procesados y tasa, derivados de la base)."""
+    minute_ago = now() - timedelta(minutes=1)
+    try:
+        queues = queue_depths()
+    except Exception as e:
+        queues = {"error": f"RabbitMQ no disponible: {e}"}
+    return {
+        "api": metrics.snapshot(),
+        "rabbitmq": queues,
+        "workers": {
+            "projection": {
+                "processed_total": db.query(func.count(ProcessedEvent.event_id)).scalar(),
+                "processed_last_minute": db.query(func.count(ProcessedEvent.event_id)).filter(ProcessedEvent.processed_at >= minute_ago).scalar(),
+            },
+            "transfers_by_status": dict(db.query(Transfer.status, func.count()).group_by(Transfer.status).all()),
+            "report_jobs_by_status": dict(db.query(ReportJob.status, func.count()).group_by(ReportJob.status).all()),
+        },
+        "warehouses": warehouse_freshness(db),
+    }
 
 
 @app.get("/warehouses/status")
