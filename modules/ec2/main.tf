@@ -15,6 +15,13 @@ resource "aws_instance" "this" {
     volume_type = "gp3"
   }
 
+  # IMDSv2 con hop limit 2: los contenedores (un salto de red más) pueden obtener
+  # las credenciales temporales del LabInstanceProfile para escribir en S3
+  metadata_options {
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
+
   tags = {
     Name = var.instance_name
   }
