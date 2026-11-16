@@ -56,6 +56,7 @@ flowchart LR
 | 9. Lambda | Validador de reportes disparado por S3 vía EventBridge |
 | 10. Resiliencia | Reintentos con backoff, DLQ, replay, idempotencia persistente, matriz de errores |
 | 11. Observabilidad + carga | `X-Correlation-ID` de punta a punta, logs JSON, `/metrics`, escenarios k6 |
+| 12. Extensión IoT | Simulador de sensores de telemetría multi-bodega con métricas, reordenamiento y duplicados (`scripts/simulate_iot.py`) |
 
 ## Estructura
 
@@ -64,15 +65,17 @@ main.tf, variables.tf, outputs.tf   Terraform: VPCs, peering, SGs, EC2, S3 (Clou
 modules/{vpc,ec2}                   módulos reutilizados con for_each
 scripts/install_docker.sh.tftpl     user data: swap + Docker
 scripts/deploy.sh                   sincroniza app/ en las EC2 y levanta los contenedores
+scripts/simulate_iot.py             simulador de sensores IoT (Fase 12)
 app/docker-compose.central.yml      RabbitMQ, PostgreSQL central, API central, worker
 app/docker-compose.warehouse.yml    una bodega: Nginx, API xN, outbox relay, PostgreSQL, Redis
 app/src/backend/app                 API de bodega (FastAPI) + tests
+app/src/backend/app/db              esquema (schema.sql), datos iniciales (seed.sql) y migraciones
 app/src/central                     API central, worker (proyección, Saga, reportes), batch + tests
 app/src/shared                      observabilidad y topología de RabbitMQ compartidas
 app/src/lb                          Nginx (LB + frontend de la bodega)
 lambda/report_validator             Lambda + tests
 tests/load                          escenarios k6 y resultados
-docs/                               ADRs, eventos, pruebas
+docs/                               ADRs (10 decisiones), eventos, pruebas
 ```
 
 ## Despliegue en AWS Academy

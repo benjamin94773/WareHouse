@@ -171,6 +171,36 @@ Estados y compensaciones:
 
 ---
 
+## ADR-010 — Modelo de seguridad, aislamiento de red y gestión de secretos
+
+**Contexto.** El proyecto debe definir el manejo de credenciales, aislamiento perimetral, control de accesos y prevención de vectores comunes de vulnerabilidad (inyección SQL, exposición de datos, sobrecarga).
+
+**Decisión.**
+1. **Gestión de secretos fuera de Git:**
+   - Contraseñas de bases de datos (`DB_PASSWORD`, `CENTRAL_DB_PASSWORD`) y RabbitMQ se generan de forma aleatoria mediante `openssl rand -hex 16` durante el primer despliegue en `.deploy.env`.
+   - `.deploy.env` está explícitamente excluido en `.gitignore` con permisos estrictos (`chmod 600`).
+   - Ninguna credencial, clave de API ni secreto vive en el repositorio.
+2. **Aislamiento perimetral y mínimo privilegio en red:**
+   - La arquitectura es Hub-and-Spoke estricta: las bodegas únicamente tienen peering con la central y carecen de conectividad entre sí.
+   - Los puertos de datos sensibles (PostgreSQL `5432` y RabbitMQ AMQP `5672`) solo aceptan tráfico interno dentro de la red corporativa/VPC (`10.0.0.0/8`). No están expuestos a Internet.
+   - S3 tiene todas las opciones de bloqueo de acceso público activadas (`BlockPublicAcls`, `BlockPublicPolicy`, `IgnorePublicAcls`, `RestrictPublicBuckets`).
+3. **Credenciales en la nube:**
+   - Acceso a S3 y EventBridge mediante el rol IAM asignado a la instancia (`LabInstanceProfile` / IMDSv2). No se usan llaves estáticas (`AWS_ACCESS_KEY_ID`).
+4. **Validación y mitigación de inyección:**
+   - Validación estricta de esquemas de entrada en APIs mediante Pydantic y serialización controlada.
+   - Todas las consultas a base de datos utilizan el ORM de SQLAlchemy con consultas parametrizadas, evitando inyecciones SQL.
+   - Restricciones a nivel de base de datos (`CHECK (quantity >= 0)`).
+
+**Consecuencias y trade-offs del laboratorio:**
+- (+) Alta seguridad en el plano de red e infraestructura sin credenciales filtrables.
+- (−) **Autenticación en endpoints `/admin` y puerto 8080:** En este entorno de laboratorio, los endpoints de inyección de fallos (`/admin/inject/*`) y la API central no implementan tokens HTTP Bearer / Basic Auth para facilitar las pruebas automáticas, las suites de k6 y los scripts de curl documentados.
+- **Camino a producción:**
+  - Incorporar autenticación mediante tokens JWT (OAuth2 / OIDC) en la API Central y en cada bodega.
+  - Colocar la API central detrás de un Application Load Balancer con certificado HTTPS (AWS Certificate Manager) y AWS WAF.
+  - Proteger los endpoints `/admin` mediante red privada (VPC Endpoint) o roles de administración específicos (RBAC).
+
+---
+
 ## Pregunta final: 100 bodegas con cargas distintas
 
 Escalarían de forma independiente:
