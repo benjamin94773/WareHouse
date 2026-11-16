@@ -9,6 +9,7 @@ import time
 import redis
 
 from app.config import settings
+from shared.observability import log
 
 logger = logging.getLogger("cache")
 
@@ -34,7 +35,7 @@ def _call(fn, *args):
         return fn(*args)
     except redis.RedisError as e:
         _down_until = time.monotonic() + RETRY_AFTER_S
-        logger.warning("redis_unavailable fallback=postgres error=%s", e)
+        log(logger, "redis_unavailable", logging.WARNING, fallback="postgres", retry_in_s=RETRY_AFTER_S, error=str(e))
         return None
 
 

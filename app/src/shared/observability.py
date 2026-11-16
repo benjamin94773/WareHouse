@@ -57,6 +57,7 @@ def setup_logging():
     root.handlers = [handler]
     root.setLevel(logging.INFO)
     logging.getLogger("uvicorn.access").disabled = True  # reemplazado por el log http_request
+    logging.getLogger("pika").setLevel(logging.WARNING)  # pika registra cada conexión en INFO
 
 
 def log(logger: logging.Logger, event: str, level=logging.INFO, **fields):
