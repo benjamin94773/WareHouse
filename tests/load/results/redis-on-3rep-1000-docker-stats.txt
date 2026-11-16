@@ -1,0 +1,7 @@
+warehouse-lb-1 cpu=11.01% mem=23.65MiB / 1.86GiB
+warehouse-outbox_relay-1 cpu=0.21% mem=51.27MiB / 1.86GiB
+warehouse-api-6 cpu=66.26% mem=120.9MiB / 1.86GiB
+warehouse-api-4 cpu=39.80% mem=102.5MiB / 1.86GiB
+warehouse-api-5 cpu=63.83% mem=100.1MiB / 1.86GiB
+warehouse-postgres-1 cpu=0.11% mem=57.53MiB / 1.86GiB
+warehouse-redis-1 cpu=2.72% mem=4.902MiB / 1.86GiB

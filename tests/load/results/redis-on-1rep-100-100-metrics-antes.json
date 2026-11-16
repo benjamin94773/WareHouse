@@ -1,0 +1,1 @@
+{"warehouse_id":"WH-001","api":{"instance":"1f006eaaa5e4","requests_total":3,"errors_5xx_total":0,"error_rate":0.0,"avg_rps_since_start":0.17,"latency_ms":{"p50":2.34,"p95":3.99,"p99":3.99,"window":3}},"redis":{"enabled":true,"hits":175418,"misses":130,"hit_ratio":0.9993,"used_memory_human":"1.08M"},"postgres":{"connections":2,"active":1,"waiting_locks":0,"outbox_pending":0}}

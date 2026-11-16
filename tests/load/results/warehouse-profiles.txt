@@ -1,0 +1,57 @@
+time="2026-11-16T04:02:57Z" level=warning msg="Insufficient VUs, reached 800 active VUs and cannot initialize more" executor=constant-arrival-rate scenario=wh002
+
+
+  █ THRESHOLDS 
+
+    http_req_duration{scenario:wh001}
+    ✓ 'p(95)>=0' p(95)=8.19ms
+
+    http_req_duration{scenario:wh002}
+    ✓ 'p(95)>=0' p(95)=4.31s
+
+    http_req_duration{scenario:wh003}
+    ✓ 'p(95)>=0' p(95)=10.05ms
+
+    http_req_failed{scenario:wh001}
+    ✓ 'rate>=0' rate=0.00%
+
+    http_req_failed{scenario:wh002}
+    ✓ 'rate>=0' rate=0.00%
+
+    http_req_failed{scenario:wh003}
+    ✓ 'rate>=0' rate=0.00%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 17717   572.638391/s
+    checks_succeeded...: 100.00% 17717 out of 17717
+    checks_failed......: 0.00%   0 out of 17717
+
+    ✓ 200
+
+    HTTP
+    http_req_duration..............: avg=1.29s  p(50)=573.52ms p(95)=4.28s   p(99)=4.64s  
+      { expected_response:true }...: avg=1.29s  p(50)=573.52ms p(95)=4.28s   p(99)=4.64s  
+      { scenario:wh001 }...........: avg=4.55ms p(50)=3.58ms   p(95)=8.19ms  p(99)=27.8ms 
+      { scenario:wh002 }...........: avg=1.46s  p(50)=866.47ms p(95)=4.31s   p(99)=4.66s  
+      { scenario:wh003 }...........: avg=5.3ms  p(50)=3.8ms    p(95)=10.05ms p(99)=51.93ms
+    http_req_failed................: 0.00%  0 out of 17717
+      { scenario:wh001 }...........: 0.00%  0 out of 1501
+      { scenario:wh002 }...........: 0.00%  0 out of 15615
+      { scenario:wh003 }...........: 0.00%  0 out of 601
+    http_reqs......................: 17717  572.638391/s
+
+    EXECUTION
+    dropped_iterations.............: 8385   271.015009/s
+    iteration_duration.............: avg=1.29s  p(50)=573.61ms p(95)=4.28s   p(99)=4.64s  
+    iterations.....................: 17717  572.638391/s
+    vus............................: 52     min=52         max=802
+    vus_max........................: 823    min=324        max=823
+
+    NETWORK
+    data_received..................: 6.3 MB 205 kB/s
+    data_sent......................: 1.4 MB 46 kB/s
+
+
+
