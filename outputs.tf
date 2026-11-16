@@ -28,7 +28,7 @@ output "central" {
 
 output "s3_bucket" {
   description = "Bucket S3 para reportes y snapshots del batch"
-  value       = aws_s3_bucket.platform.bucket
+  value       = aws_cloudformation_stack.platform_bucket.outputs["BucketName"]
 }
 
 output "vpc_central" {

@@ -210,17 +210,33 @@ module "ec2_bodegas" {
 # 6. ALMACENAMIENTO HISTÓRICO (S3) PARA REPORTES Y SNAPSHOTS DEL BATCH
 # ==============================================================================
 
+# Se crea con CloudFormation: en AWS Academy el recurso aws_s3_bucket de Terraform falla al
+# leer la configuración de Object Lock (bloqueada por una SCP del laboratorio).
 data "aws_caller_identity" "current" {}
 
-resource "aws_s3_bucket" "platform" {
-  bucket        = "warehouse-platform-${data.aws_caller_identity.current.account_id}"
-  force_destroy = true # el lab se recrea a menudo; permite destroy con objetos dentro
+locals {
+  bucket_name = "warehouse-platform-${data.aws_caller_identity.current.account_id}"
 }
 
-resource "aws_s3_bucket_public_access_block" "platform" {
-  bucket                  = aws_s3_bucket.platform.id
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+resource "aws_cloudformation_stack" "platform_bucket" {
+  name = "warehouse-platform-bucket"
+
+  template_body = jsonencode({
+    Resources = {
+      Bucket = {
+        Type           = "AWS::S3::Bucket"
+        DeletionPolicy = "Delete"
+        Properties = {
+          BucketName = local.bucket_name
+          PublicAccessBlockConfiguration = {
+            BlockPublicAcls       = true
+            BlockPublicPolicy     = true
+            IgnorePublicAcls      = true
+            RestrictPublicBuckets = true
+          }
+        }
+      }
+    }
+    Outputs = { BucketName = { Value = { Ref = "Bucket" } } }
+  })
 }
