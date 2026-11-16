@@ -33,6 +33,7 @@ services:
   central_db:
     image: postgres:16-alpine
     restart: unless-stopped
+    command: ["postgres", "-c", "max_connections=200"]  # 3 réplicas x 40 + relay/worker
     environment:
       POSTGRES_PASSWORD: ${CENTRAL_DB_PASSWORD:-postgres}
       POSTGRES_DB: central

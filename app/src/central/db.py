@@ -6,7 +6,10 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-engine = create_engine(os.getenv("CENTRAL_DATABASE_URL", "sqlite:///./central.db"), pool_pre_ping=True)
+DATABASE_URL = os.getenv("CENTRAL_DATABASE_URL", "sqlite:///./central.db")
+# Pool >= hilos de FastAPI (40) para evitar el interbloqueo de dependencias síncronas (ver la bodega)
+POOL_KW = {} if DATABASE_URL.startswith("sqlite") else {"pool_size": 10, "max_overflow": 30, "pool_timeout": 5}
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, **POOL_KW)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 Base = declarative_base()
 
