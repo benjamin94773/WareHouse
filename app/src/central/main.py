@@ -314,7 +314,10 @@ def replay_dlq(queue: str):
     conn, ch = _channel()
     moved = 0
     try:
-        while True:
+        # Solo los mensajes presentes al inicio: los que vuelvan a fallar regresan a la DLQ
+        # mientras se recorre y no deben reinyectarse en un ciclo sin fin
+        pending = ch.queue_declare(f"{queue}.dlq", passive=True).method.message_count
+        for _ in range(pending):
             method, props, body = ch.basic_get(f"{queue}.dlq")
             if method is None:
                 break
