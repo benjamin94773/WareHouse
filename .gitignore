@@ -40,3 +40,6 @@ project/*
 
 # Base SQLite de las pruebas
 *test.db
+
+# Secretos generados por scripts/deploy.sh
+.deploy.env

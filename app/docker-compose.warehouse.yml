@@ -1,0 +1,85 @@
+# Una bodega autónoma: LB Nginx + N réplicas de API + outbox relay + PostgreSQL + Redis.
+# Se parametriza con .env (WH_ID, RABBITMQ_HOST, API_REPLICAS, CACHE_ENABLED, ...).
+#   docker compose -f docker-compose.warehouse.yml -p wh001 up -d --build
+name: ${COMPOSE_PROJECT_NAME:-warehouse}
+
+x-api-env: &api-env
+  WAREHOUSE_ID: ${WH_ID:?define WH_ID, p. ej. WH-001}
+  DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-postgres}@postgres:5432/warehouse_db
+  REDIS_URL: redis://redis:6379/0
+  CACHE_ENABLED: ${CACHE_ENABLED:-true}
+  RABBITMQ_HOST: ${RABBITMQ_HOST:-host.docker.internal}
+  RABBITMQ_USER: ${RABBITMQ_USER:-warehouse}
+  RABBITMQ_PASS: ${RABBITMQ_PASS:-warehouse}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: warehouse_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./src/backend/app/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+
+  api:
+    build:
+      context: ./src
+      dockerfile: backend/app/Dockerfile
+    image: warehouse-api:latest
+    restart: unless-stopped
+    environment:
+      <<: *api-env
+      SERVICE_NAME: warehouse-api
+    deploy:
+      replicas: ${API_REPLICAS:-3}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 10s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  outbox_relay:
+    build:  # misma imagen que la API (capas en caché), otro proceso
+      context: ./src
+      dockerfile: backend/app/Dockerfile
+    image: warehouse-api:latest
+    restart: unless-stopped
+    command: ["python", "-m", "app.outbox_relay"]
+    environment:
+      <<: *api-env
+      SERVICE_NAME: outbox-relay
+    depends_on:
+      api:
+        condition: service_started  # la API crea las tablas y construye la imagen
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  lb:
+    build: ./src/lb
+    restart: unless-stopped
+    ports:
+      - "${LB_PORT:-80}:80"
+    environment:
+      API_TARGET: api:8000
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

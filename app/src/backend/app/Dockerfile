@@ -12,4 +12,5 @@ COPY backend/app/main.py main.py
 
 EXPOSE 8000
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# root-path: detrás del LB la API se publica en /api (necesario para /api/docs)
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--root-path", "/api"]
