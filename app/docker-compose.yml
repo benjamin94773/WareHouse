@@ -63,8 +63,8 @@ services:
 
   api_wh001:
     build:
-      context: ./src/backend/app
-      dockerfile: Dockerfile
+      context: ./src
+      dockerfile: backend/app/Dockerfile
     container_name: api_wh001
     ports:
       - "8001:8000"
@@ -118,8 +118,8 @@ services:
 
   api_wh002:
     build:
-      context: ./src/backend/app
-      dockerfile: Dockerfile
+      context: ./src
+      dockerfile: backend/app/Dockerfile
     container_name: api_wh002
     ports:
       - "8002:8000"
@@ -173,8 +173,8 @@ services:
 
   api_wh003:
     build:
-      context: ./src/backend/app
-      dockerfile: Dockerfile
+      context: ./src
+      dockerfile: backend/app/Dockerfile
     container_name: api_wh003
     ports:
       - "8003:8000"

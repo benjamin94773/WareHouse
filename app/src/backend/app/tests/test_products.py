@@ -19,3 +19,15 @@ def test_sku_duplicado(client, product):
 def test_no_elimina_producto_con_stock(client, product):
     move(client, product["id"], "RECEIPT", 1)
     assert client.delete(f"/products/{product['id']}").status_code == 409
+
+
+def test_correlation_id_se_propaga_y_genera(client):
+    r = client.get("/products", headers={"X-Correlation-ID": "COR-TEST-1"})
+    assert r.headers["X-Correlation-ID"] == "COR-TEST-1"
+    assert client.get("/products").headers["X-Correlation-ID"].startswith("COR-")
+
+
+def test_health_y_metrics(client):
+    assert client.get("/health").json()["status"] == "ok"
+    m = client.get("/metrics").json()
+    assert m["api"]["requests_total"] >= 1

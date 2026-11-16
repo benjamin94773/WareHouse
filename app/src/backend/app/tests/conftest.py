@@ -4,7 +4,8 @@ import sys
 # Base SQLite en memoria compartida: las pruebas no necesitan PostgreSQL ni RabbitMQ
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 os.environ.setdefault("WAREHOUSE_ID", "WH-TEST")
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+ROOT = os.path.dirname(os.path.dirname(__file__))
+sys.path[:0] = [ROOT, os.path.join(ROOT, "..", "..")]  # app/ y app/src/ (paquete shared)
 
 import pytest
 from fastapi.testclient import TestClient
