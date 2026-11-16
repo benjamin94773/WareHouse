@@ -65,6 +65,24 @@ class WarehouseStatus(Base):
     last_error = Column(Text)
 
 
+class Transfer(Base):
+    """Estado persistido de la Saga: el worker puede caer y retomar desde el último paso confirmado."""
+    __tablename__ = "transfers"
+    id = Column(String, primary_key=True)
+    source = Column(String, nullable=False)
+    destination = Column(String, nullable=False)
+    sku = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, index=True)
+    error = Column(Text)
+    simulate_failure = Column(String)  # before_reserve | after_reserve (experimentos)
+    step_delay = Column(Integer, default=0)  # segundos entre pasos, para reiniciar el worker a mitad
+    correlation_id = Column(String)
+    history = Column(JSON, default=list)
+    created_at = Column(DateTime(timezone=True), default=now)
+    updated_at = Column(DateTime(timezone=True), default=now, onupdate=now)
+
+
 @contextmanager
 def session_scope():
     db = SessionLocal()

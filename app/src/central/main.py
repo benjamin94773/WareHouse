@@ -4,21 +4,23 @@ import logging
 import os
 import threading
 import time
+import uuid
 from datetime import timedelta
-from typing import Any, Dict
+from typing import Any, Dict, Literal, Optional
 
 import pika
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from shared.observability import install, log, setup_logging
+from shared.observability import correlation_id, install, log, setup_logging
 
 setup_logging()
 
 import warehouses  # noqa: E402
-from db import Base, EventLog, InventoryView, WarehouseStatus, aware, engine, get_db, now, session_scope  # noqa: E402
+from db import Base, EventLog, InventoryView, Transfer, WarehouseStatus, aware, engine, get_db, now, session_scope  # noqa: E402
 from shared import messaging  # noqa: E402
 
 logger = logging.getLogger("central_api")
@@ -135,6 +137,76 @@ def global_inventory_by_sku(sku: str, db: Session = Depends(get_db)):
 def global_inventory_live(sku: str):
     """Alternativa A, solo para comparar latencia y disponibilidad con el read model."""
     return warehouses.live_inventory(sku)
+
+
+# ==============================================================================
+# Transferencias (Saga orquestada por el worker)
+# ==============================================================================
+class TransferRequest(BaseModel):
+    source: str
+    destination: str
+    sku: str
+    quantity: int = Field(..., gt=0)
+    simulate_failure: Optional[Literal["before_reserve", "after_reserve"]] = None
+    step_delay: int = Field(0, ge=0, le=10)
+
+
+def publish_command(routing_key: str, body: dict):
+    conn, ch = _channel()
+    try:
+        ch.confirm_delivery()
+        ch.basic_publish(messaging.COMMANDS_EXCHANGE, routing_key, json.dumps(body).encode(),
+                         messaging.persistent(correlation_id.get()), mandatory=True)
+    finally:
+        conn.close()
+
+
+def transfer_view(t: Transfer):
+    return {c.name: getattr(t, c.name) for c in Transfer.__table__.columns}
+
+
+@app.post("/transfers", status_code=202)
+def create_transfer(req: TransferRequest, db: Session = Depends(get_db)):
+    src, dst = req.source.upper(), req.destination.upper()
+    known = warehouses.warehouse_urls()
+    if src == dst or src not in known or dst not in known:
+        raise HTTPException(422, f"Origen y destino deben ser bodegas distintas de {sorted(known)}")
+    t = Transfer(id=f"TR-{uuid.uuid4().hex[:8].upper()}", source=src, destination=dst, sku=req.sku,
+                 quantity=req.quantity, status="REQUESTED", simulate_failure=req.simulate_failure,
+                 step_delay=req.step_delay, correlation_id=correlation_id.get(),
+                 history=[{"status": "REQUESTED", "at": now().isoformat()}])
+    db.add(t)
+    db.commit()
+    try:
+        publish_command("transfer", {"transfer_id": t.id})
+    except Exception as e:
+        # Operación crítica sin broker: se rechaza en vez de dejarla a medias (ver ADR de RabbitMQ caído)
+        t.status, t.error = "FAILED", f"broker no disponible: {e}"
+        db.commit()
+        raise HTTPException(503, f"RabbitMQ no disponible; transferencia {t.id} rechazada")
+    return {"transfer_id": t.id, "status": "PROCESSING", "correlation_id": t.correlation_id}
+
+
+@app.get("/transfers")
+def list_transfers(limit: int = 20, db: Session = Depends(get_db)):
+    return [transfer_view(t) for t in db.query(Transfer).order_by(Transfer.created_at.desc()).limit(limit)]
+
+
+@app.get("/transfers/{transfer_id}")
+def get_transfer(transfer_id: str, db: Session = Depends(get_db)):
+    t = db.get(Transfer, transfer_id)
+    if not t:
+        raise HTTPException(404, "Transferencia no encontrada")
+    return transfer_view(t)
+
+
+@app.post("/transfers/{transfer_id}/redeliver")
+def redeliver_transfer(transfer_id: str, db: Session = Depends(get_db)):
+    """Reenvía el comando: retoma una Saga pendiente o, si ya terminó, prueba que el duplicado se ignora."""
+    if not db.get(Transfer, transfer_id):
+        raise HTTPException(404, "Transferencia no encontrada")
+    publish_command("transfer", {"transfer_id": transfer_id})
+    return {"transfer_id": transfer_id, "redelivered": True}
 
 
 # ==============================================================================
