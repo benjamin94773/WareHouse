@@ -23,43 +23,38 @@ class InventoryService:
 
     def process_movement(self, movement_in: MovementCreate):
         try:
-            # 1. Obtener balance actual bloqueando la fila de manera atómica (Lock pesimista)
+            # 1. Bloqueo pesimista de la fila: dos salidas concurrentes se serializan aquí
             inventory = self.repo.get_by_product_for_update(movement_in.product_id)
             if not inventory:
-                # Auto-inicializar registro de inventario si es el primer movimiento
-                inventory = self.repo.initialize_inventory(movement_in.product_id)
-                self.db.flush()
+                # La fila se crea junto con el producto: si no existe, el producto no existe
+                raise HTTPException(status.HTTP_404_NOT_FOUND, f"Producto {movement_in.product_id} no existe en {settings.WAREHOUSE_ID}")
 
             new_qty = inventory.quantity
             new_reserved = inventory.reserved_quantity
-            m_type = movement_in.type
+            m_type = movement_in.type.value
             qty = movement_in.quantity
 
-            # 2. Evaluación de Reglas de Negocio
-            if m_type in ["SHIPMENT", "TRANSFER_OUT"]:
-                if new_qty < qty:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Stock insuficiente. Disponible: {new_qty}, Requerido: {qty}"
-                    )
-                new_qty -= qty
-
-            elif m_type in ["RECEIPT", "TRANSFER_IN", "RETURN"]:
+            # 2. Reglas de negocio: quantity = disponible, reserved_quantity = retenido
+            if m_type in ("RECEIPT", "TRANSFER_IN", "RETURN"):
                 new_qty += qty
-
+            elif m_type in ("SHIPMENT", "TRANSFER_OUT"):
+                if new_qty < qty:
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Stock insuficiente. Disponible: {new_qty}, Requerido: {qty}")
+                new_qty -= qty
+            elif m_type == "ADJUSTMENT":
+                if new_qty + qty < 0:
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, f"El ajuste dejaría el inventario negativo ({new_qty} {qty:+d})")
+                new_qty += qty
             elif m_type == "RESERVATION":
                 if new_qty < qty:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Stock insuficiente para reservar")
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, "Stock insuficiente para reservar")
                 new_qty -= qty
                 new_reserved += qty
-
             elif m_type == "RELEASE":
                 if new_reserved < qty:
-                    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Liberación excede reserva existente")
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, "Liberación excede reserva existente")
                 new_reserved -= qty
                 new_qty += qty
-            else:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tipo de movimiento inválido")
 
             # 3. Aplicar mutación y registrar movimiento
             self.repo.update_stock(inventory, new_qty, new_reserved)
@@ -89,12 +84,10 @@ class InventoryService:
             # 5. Confirmación atómica de ambas operaciones
             self.db.commit()
             return movement
-
-        except Exception as e:
+        except Exception:
+            # ROLLBACK: inventario, movimiento y evento se descartan juntos
             self.db.rollback()
-            if isinstance(e, HTTPException):
-                raise e
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+            raise
 
     def get_movements(self, product_id: int):
         return self.repo.get_movements_by_product(product_id)

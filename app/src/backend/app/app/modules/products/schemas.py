@@ -1,13 +1,22 @@
 from typing import Optional
-from pydantic import BaseModel
 from datetime import datetime
+from pydantic import BaseModel, Field
+
 
 class ProductCreate(BaseModel):
-    sku: str
-    name: str
+    sku: str = Field(..., min_length=1, max_length=64)
+    name: str = Field(..., min_length=1)
     description: Optional[str] = None
     category: Optional[str] = None
-    unit: str
+    unit: str = Field(..., min_length=1)
+
+
+class ProductUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1)
+    description: Optional[str] = None
+    category: Optional[str] = None
+    unit: Optional[str] = Field(None, min_length=1)
+
 
 class ProductResponse(BaseModel):
     id: int

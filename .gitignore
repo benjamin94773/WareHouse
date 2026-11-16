@@ -37,3 +37,6 @@ project/*
 !project/docs/
 !project/README.md
 .DS_Store
+
+# Base SQLite de las pruebas
+test.db

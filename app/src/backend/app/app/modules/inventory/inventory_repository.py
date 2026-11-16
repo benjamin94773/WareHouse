@@ -51,7 +51,7 @@ class InventoryRepository:
         return self.db.query(InventoryMovementEntity).filter(
             InventoryMovementEntity.product_id == product_id,
             InventoryMovementEntity.warehouse_id == settings.WAREHOUSE_ID
-        ).all()
+        ).order_by(InventoryMovementEntity.id).all()
 
     # ==========================================================================
     # Operaciones del Patrón Outbox
