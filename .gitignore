@@ -31,3 +31,9 @@ plans/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Material del curso: solo se versiona project/docs (enunciado y guías por fase)
+project/*
+!project/docs/
+!project/README.md
+.DS_Store
