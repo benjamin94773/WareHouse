@@ -15,7 +15,7 @@ import pika
 from pika.exceptions import AMQPError
 from sqlalchemy.exc import IntegrityError
 
-from db import EventLog, InventoryView, ProcessedEvent, WarehouseStatus, aware, now, session_scope
+from db import EventLog, InventoryView, ProcessedEvent, SensorAlert, SensorTelemetry, WarehouseStatus, aware, now, session_scope
 from shared import messaging
 from shared.observability import correlation_id, log
 
@@ -128,3 +128,84 @@ def _parse_ts(value):
         return datetime.fromisoformat(value) if value else None
     except ValueError:
         return None
+
+
+# ==============================================================================
+# Ingestión y Procesamiento de Sensores IoT (Fase 12)
+# ==============================================================================
+IOT_REQUIRED = ("event_id", "sequence_number", "warehouse_id", "sensor_id", "value")
+
+
+def process_iot_event(msg: dict):
+    """
+    Procesa eventos de telemetría IoT desde RabbitMQ:
+    - Idempotencia: evita duplicados usando ProcessedEvent (event_id, consumer='iot').
+    - Sequence numbers: detecta telemetría fuera de orden.
+    - Persistencia en SensorTelemetry.
+    - Detección de umbrales críticos y generación de SensorAlert.
+    """
+    missing = [f for f in IOT_REQUIRED if msg.get(f) is None]
+    if missing:
+        raise PermanentError(f"evento IoT inválido, faltan campos: {missing}")
+
+    event_id = msg["event_id"]
+    wh = msg["warehouse_id"]
+    sensor_id = msg["sensor_id"]
+    stype = msg.get("sensor_type") or sensor_id.split("-")[0]
+    val = float(msg["value"])
+    seq = int(msg["sequence_number"])
+    ts = aware(_parse_ts(msg.get("timestamp"))) or now()
+
+    try:
+        with session_scope() as db:
+            # 1. Idempotencia persistente
+            if db.get(ProcessedEvent, (event_id, "iot")):
+                log(logger, "duplicate_iot_event_ignored", event_id=event_id, sensor_id=sensor_id)
+                return
+
+            db.add(ProcessedEvent(event_id=event_id, consumer="iot"))
+
+            # 2. Persistencia de telemetría
+            db.add(SensorTelemetry(
+                event_id=event_id,
+                sequence_number=seq,
+                warehouse_id=wh,
+                sensor_id=sensor_id,
+                sensor_type=stype,
+                value=val,
+                unit=msg.get("unit", ""),
+                timestamp=ts,
+            ))
+
+            # 3. Reglas de alertas por umbrales (temperatura alta, picos de potencia, humedad)
+            alert_rule = None
+            alert_msg = None
+            if stype == "TEMP" and (val > 15.0 or val < 0.0):
+                alert_rule = "TEMP_OUT_OF_RANGE"
+                alert_msg = f"Temperatura anómala de {val}°C en sensor {sensor_id} ({wh})"
+            elif stype == "PWR" and val > 10.0:
+                alert_rule = "POWER_SURGE"
+                alert_msg = f"Pico de consumo eléctrico ({val} kWh) en {sensor_id} ({wh})"
+            elif stype == "HUM" and val > 70.0:
+                alert_rule = "HIGH_HUMIDITY"
+                alert_msg = f"Humedad crítica ({val}%) en {sensor_id} ({wh})"
+
+            if alert_rule:
+                db.add(SensorAlert(
+                    event_id=event_id,
+                    warehouse_id=wh,
+                    sensor_id=sensor_id,
+                    sensor_type=stype,
+                    value=val,
+                    rule=alert_rule,
+                    alert_message=alert_msg,
+                ))
+                log(logger, "iot_alert_triggered", logging.WARNING,
+                    rule=alert_rule, warehouse_id=wh, sensor_id=sensor_id, value=val)
+
+    except IntegrityError:
+        log(logger, "duplicate_iot_event_ignored", event_id=event_id, note="carrera concurrente")
+        return
+
+    log(logger, "iot_telemetry_stored", event_id=event_id, warehouse_id=wh, sensor_id=sensor_id, seq=seq)
+

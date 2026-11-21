@@ -104,6 +104,31 @@ Formato de la guía de entrega: Contexto → Alternativas → Decisión → Cons
 
 **Decisión.** Orquestada. La central es el único punto con red hacia todas las bodegas y deja el estado de cada transferencia visible en un solo lugar (`GET /transfers/{id}` con su historial).
 
+```mermaid
+stateDiagram-v2
+    [*] --> REQUESTED: POST /transfers (202)
+    REQUESTED --> RESERVING_SOURCE: Worker toma comando
+    REQUESTED --> FAILED: Error inicial / simulado
+
+    RESERVING_SOURCE --> SOURCE_RESERVED: RESERVATION en origen
+    RESERVING_SOURCE --> FAILED: Sin stock / sku inexistente
+
+    SOURCE_RESERVED --> IN_TRANSIT: Inicia recepción
+    SOURCE_RESERVED --> COMPENSATING: Fallo simulado / error
+
+    IN_TRANSIT --> DESTINATION_RECEIVED: TRANSFER_IN en destino
+    IN_TRANSIT --> COMPENSATING: Destino 4xx o no responde
+
+    DESTINATION_RECEIVED --> COMPLETED: TRANSFER_OUT en origen
+    DESTINATION_RECEIVED --> DESTINATION_RECEIVED: Origen falla (reintentar /redeliver)
+
+    COMPENSATING --> CANCELLED: RELEASE reserva en origen
+
+    COMPLETED --> [*]
+    FAILED --> [*]
+    CANCELLED --> [*]
+```
+
 Estados y compensaciones:
 
 | Falla en | Estado final | Compensación |

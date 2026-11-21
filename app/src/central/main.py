@@ -21,7 +21,7 @@ setup_logging()
 
 import reports  # noqa: E402
 import warehouses  # noqa: E402
-from db import Base, EventLog, IntegrationEvent, InventoryView, ProcessedEvent, ReportJob, Transfer, WarehouseStatus, aware, engine, get_db, now, session_scope  # noqa: E402
+from db import Base, EventLog, IntegrationEvent, InventoryView, ProcessedEvent, ReportJob, SensorAlert, SensorTelemetry, Transfer, WarehouseStatus, aware, engine, get_db, now, session_scope  # noqa: E402
 from shared import messaging  # noqa: E402
 
 logger = logging.getLogger("central_api")
@@ -431,3 +431,82 @@ def warehouse_audit(warehouse_id: str):
         return {"status": "success", "warehouse_id": warehouse_id, "outbox_events": events}
     except Exception as e:
         return {"status": "error", "warehouse_id": warehouse_id, "outbox_events": [], "error": str(e)}
+
+
+# ==============================================================================
+# Servicio de Ingestión IoT (Fase 12 — Extensión IoT)
+# ==============================================================================
+@app.post("/api/iot/telemetry")
+def ingest_iot_telemetry(payload: Dict[str, Any]):
+    """
+    Ingestion Service: Recibe telemetría de sensores IoT (directa o vía gateway MQTT).
+    Publica el evento en RabbitMQ topic exchange 'warehouse.iot' para procesamiento
+    asíncrono desacoplado (almacenamiento, analítica y alertas).
+    """
+    wh = payload.get("warehouse_id", "WH-001")
+    stype = payload.get("sensor_type") or (payload.get("sensor_id", "").split("-")[0] if "-" in payload.get("sensor_id", "") else "UNKNOWN")
+    rk = f"iot.telemetry.{wh}.{stype}"
+
+    body = json.dumps(payload).encode()
+    try:
+        conn, ch = _channel()
+        try:
+            ch.basic_publish(
+                exchange=messaging.IOT_EXCHANGE,
+                routing_key=rk,
+                body=body,
+                properties=messaging.persistent(correlation_id=payload.get("correlation_id")),
+            )
+        finally:
+            conn.close()
+        return {"status": "accepted", "event_id": payload.get("event_id"), "routing_key": rk}
+    except Exception as e:
+        log(logger, "iot_ingest_publish_error", logging.ERROR, error=str(e))
+        raise HTTPException(status_code=503, detail=f"Broker de mensajería no disponible: {e}")
+
+
+@app.get("/api/iot/telemetry")
+def list_iot_telemetry(warehouse_id: Optional[str] = None, limit: int = 50, db: Session = Depends(get_db)):
+    """Consulta la telemetría almacenada de sensores en las bodegas."""
+    query = db.query(SensorTelemetry)
+    if warehouse_id:
+        query = query.filter(SensorTelemetry.warehouse_id == warehouse_id.upper())
+    rows = query.order_by(SensorTelemetry.received_at.desc()).limit(limit).all()
+    return [
+        {
+            "id": r.id,
+            "event_id": r.event_id,
+            "sequence_number": r.sequence_number,
+            "warehouse_id": r.warehouse_id,
+            "sensor_id": r.sensor_id,
+            "sensor_type": r.sensor_type,
+            "value": r.value,
+            "unit": r.unit,
+            "timestamp": aware(r.timestamp).isoformat() if r.timestamp else None,
+            "received_at": aware(r.received_at).isoformat() if r.received_at else None,
+        }
+        for r in rows
+    ]
+
+
+@app.get("/api/iot/alerts")
+def list_iot_alerts(warehouse_id: Optional[str] = None, limit: int = 50, db: Session = Depends(get_db)):
+    """Consulta alertas de telemetría fuera de rango."""
+    query = db.query(SensorAlert)
+    if warehouse_id:
+        query = query.filter(SensorAlert.warehouse_id == warehouse_id.upper())
+    rows = query.order_by(SensorAlert.created_at.desc()).limit(limit).all()
+    return [
+        {
+            "id": r.id,
+            "event_id": r.event_id,
+            "warehouse_id": r.warehouse_id,
+            "sensor_id": r.sensor_id,
+            "sensor_type": r.sensor_type,
+            "value": r.value,
+            "rule": r.rule,
+            "alert_message": r.alert_message,
+            "created_at": aware(r.created_at).isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]

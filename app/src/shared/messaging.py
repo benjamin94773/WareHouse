@@ -11,6 +11,7 @@ import pika
 
 EVENTS_EXCHANGE = "warehouse.events"
 COMMANDS_EXCHANGE = "central.commands"
+IOT_EXCHANGE = "warehouse.iot"
 DLX = "warehouse.dlx"
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 
@@ -19,6 +20,8 @@ QUEUES = {
     "central.projection": (EVENTS_EXCHANGE, "inventory.#"),
     "central.transfers": (COMMANDS_EXCHANGE, "transfer"),
     "central.reports": (COMMANDS_EXCHANGE, "report"),
+    "central.iot.telemetry": (IOT_EXCHANGE, "iot.telemetry.#"),
+    "central.iot.alerts": (IOT_EXCHANGE, "iot.alert.#"),
 }
 
 
@@ -36,6 +39,7 @@ def connection_params(timeout=5) -> pika.ConnectionParameters:
 def declare_exchanges(ch):
     ch.exchange_declare(EVENTS_EXCHANGE, "topic", durable=True)
     ch.exchange_declare(COMMANDS_EXCHANGE, "direct", durable=True)
+    ch.exchange_declare(IOT_EXCHANGE, "topic", durable=True)
     ch.exchange_declare(DLX, "direct", durable=True)
 
 

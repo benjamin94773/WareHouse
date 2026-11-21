@@ -622,7 +622,7 @@
 
             <div class="guide-box">
                 <strong>🧪 Demostración de Tolerancia a Fallos:</strong><br>
-                Si RabbitMQ se apaga (<code>docker stop warehouse_broker</code>), puedes registrar movimientos en el formulario de la izquierda sin errores. Verás que quedan guardados en estado <strong>PENDING</strong> en la base de datos de la bodega. Al volver a encenderlo (<code>docker start warehouse_broker</code>), el Outbox Worker los vacía solos y pasan a <strong>SENT</strong>.
+                Si RabbitMQ se apaga (<code>docker compose -f docker-compose.central.yml stop rabbitmq</code>), puedes registrar movimientos en el formulario de la izquierda sin errores. Verás que quedan guardados en estado <strong>PENDING</strong> en la base de datos de la bodega. Al volver a encenderlo (<code>docker compose -f docker-compose.central.yml start rabbitmq</code>), el Outbox Relay los publica automáticamente y pasan a <strong>SENT</strong>. <em>(Credenciales de RabbitMQ: usuario <code>warehouse</code>, contraseña en <code>.deploy.env</code>)</em>.
             </div>
         </div>
     </div>

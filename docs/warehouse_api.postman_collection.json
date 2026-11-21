@@ -1,0 +1,187 @@
+{
+  "info": {
+    "_postman_id": "c1f7b8e2-9b04-4c8d-8e65-728b7a956101",
+    "name": "Warehouse Cloud Platform API",
+    "description": "Colección completa de endpoints para la plataforma de bodegas distribuidas: Bodegas (CRUD, Cache Aside, Outbox) y Central (CQRS Read Model, Saga de Transferencias, Batch S3, DLQ y Resiliencia).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "central_url", "value": "http://localhost:8080", "type": "string" },
+    { "key": "wh1_url", "value": "http://localhost:8001/api", "type": "string" },
+    { "key": "wh2_url", "value": "http://localhost:8002/api", "type": "string" },
+    { "key": "wh3_url", "value": "http://localhost:8003/api", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "1. Bodegas (Operacional)",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": { "method": "GET", "url": "{{wh1_url}}/health" }
+        },
+        {
+          "name": "Métricas Prometheus",
+          "request": { "method": "GET", "url": "{{wh1_url}}/metrics" }
+        },
+        {
+          "name": "Listar Productos",
+          "request": { "method": "GET", "url": "{{wh1_url}}/products" }
+        },
+        {
+          "name": "Crear Producto",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sku\": \"P-010\",\n  \"name\": \"Webcam Full HD\",\n  \"category\": \"Accesorios\",\n  \"unit\": \"UNIDAD\"\n}"
+            },
+            "url": "{{wh1_url}}/products"
+          }
+        },
+        {
+          "name": "Consultar Stock (Cache Aside)",
+          "request": { "method": "GET", "url": "{{wh1_url}}/inventory/1" }
+        },
+        {
+          "name": "Registrar Entrada (RECEIPT) con Idempotency-Key",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "REC-001" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": 1,\n  \"type\": \"RECEIPT\",\n  \"quantity\": 20,\n  \"reference\": \"Compra Inicial\"\n}"
+            },
+            "url": "{{wh1_url}}/inventory/movements"
+          }
+        },
+        {
+          "name": "Registrar Salida (SHIPMENT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Idempotency-Key", "value": "SHIP-001" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": 1,\n  \"type\": \"SHIPMENT\",\n  \"quantity\": 5,\n  \"reference\": \"Despacho Cliente\"\n}"
+            },
+            "url": "{{wh1_url}}/inventory/movements"
+          }
+        },
+        {
+          "name": "Movimientos de un Producto",
+          "request": { "method": "GET", "url": "{{wh1_url}}/inventory/1/movements" }
+        },
+        {
+          "name": "Auditoría Transactional Outbox",
+          "request": { "method": "GET", "url": "{{wh1_url}}/inventory/outbox/audit?limit=25" }
+        }
+      ]
+    },
+    {
+      "name": "2. Plataforma Central (CQRS & Read Model)",
+      "item": [
+        {
+          "name": "Inventario Global Completo",
+          "request": { "method": "GET", "url": "{{central_url}}/global/inventory" }
+        },
+        {
+          "name": "Inventario Global por SKU (Read Model)",
+          "request": { "method": "GET", "url": "{{central_url}}/global/inventory/P-001" }
+        },
+        {
+          "name": "Comparativa Scatter-Gather en Vivo",
+          "request": { "method": "GET", "url": "{{central_url}}/global/inventory/P-001/live" }
+        },
+        {
+          "name": "Estado de Bodegas (Freshness & Stale)",
+          "request": { "method": "GET", "url": "{{central_url}}/warehouses/status" }
+        },
+        {
+          "name": "Métricas Centrales",
+          "request": { "method": "GET", "url": "{{central_url}}/metrics" }
+        }
+      ]
+    },
+    {
+      "name": "3. Transferencias (Saga Orquestada)",
+      "item": [
+        {
+          "name": "Solicitar Transferencia Exitosa (202)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"WH-001\",\n  \"destination\": \"WH-002\",\n  \"sku\": \"P-001\",\n  \"quantity\": 10\n}"
+            },
+            "url": "{{central_url}}/transfers"
+          }
+        },
+        {
+          "name": "Consultar Historial de Transferencia",
+          "request": { "method": "GET", "url": "{{central_url}}/transfers/TR-XXXXXXXX" }
+        },
+        {
+          "name": "Transferencia con Compensación (Fallo Simulado)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"source\": \"WH-001\",\n  \"destination\": \"WH-002\",\n  \"sku\": \"P-001\",\n  \"quantity\": 10,\n  \"simulate_failure\": \"after_reserve\"\n}"
+            },
+            "url": "{{central_url}}/transfers"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Batch y Reportes S3",
+      "item": [
+        {
+          "name": "Disparar Batch Diario (202)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"date\": \"2026-11-20\"\n}"
+            },
+            "url": "{{central_url}}/reports"
+          }
+        },
+        {
+          "name": "Consultar Job de Reporte",
+          "request": { "method": "GET", "url": "{{central_url}}/reports/jobs/JOB-XXXXXXXX" }
+        }
+      ]
+    },
+    {
+      "name": "5. Resiliencia, DLQ y Chaos Testing",
+      "item": [
+        {
+          "name": "Estado de Colas RabbitMQ",
+          "request": { "method": "GET", "url": "{{central_url}}/admin/queues" }
+        },
+        {
+          "name": "Inyectar Mensaje Duplicado",
+          "request": { "method": "POST", "url": "{{central_url}}/admin/inject/duplicate" }
+        },
+        {
+          "name": "Inyectar JSON Inválido (a DLQ)",
+          "request": { "method": "POST", "url": "{{central_url}}/admin/inject/invalid_json" }
+        },
+        {
+          "name": "Reinyectar Mensajes desde DLQ",
+          "request": { "method": "POST", "url": "{{central_url}}/admin/dlq/central.projection/replay" }
+        }
+      ]
+    }
+  ]
+}

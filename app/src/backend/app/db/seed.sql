@@ -1,5 +1,7 @@
 -- Datos iniciales de prueba para la bodega (seed.sql)
 -- Cumple con el Entregable 4 (Persistencia: schema.sql, seed.sql, migrations/)
+-- Nota: Para ejecución manual o en entornos de prueba. En Docker, init-seed.sh
+-- inyecta dinámicamente el WAREHOUSE_ID correspondiente a cada contenedor.
 
 -- 1. Catálogo inicial de productos
 INSERT INTO products (sku, name, description, category, unit) VALUES

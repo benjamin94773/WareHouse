@@ -1,0 +1,159 @@
+### ==============================================================================
+### Warehouse Cloud Platform - Colección de Pruebas HTTP (REST Client / .http)
+### ==============================================================================
+
+@central = http://localhost:8080
+@wh1 = http://localhost:8001/api
+@wh2 = http://localhost:8002/api
+@wh3 = http://localhost:8003/api
+
+### ------------------------------------------------------------------------------
+### 1. BODEGAS: Endpoints Operacionales
+### ------------------------------------------------------------------------------
+
+### 1.1 Health Check de Bodega
+GET {{wh1}}/health
+
+### 1.2 Métricas de Bodega (Prometheus)
+GET {{wh1}}/metrics
+
+### 1.3 Listar productos en catálogo
+GET {{wh1}}/products
+
+### 1.4 Crear un producto nuevo
+POST {{wh1}}/products
+Content-Type: application/json
+
+{
+  "sku": "P-TEST-001",
+  "name": "Disipador CPU Cooler",
+  "description": "Ventilador 120mm RGB para CPU",
+  "category": "Componentes",
+  "unit": "UNIDAD"
+}
+
+### 1.5 Consultar producto por SKU
+GET {{wh1}}/products/by-sku/P-001
+
+### 1.6 Consultar stock con Cache Aside (Verificar cabecera X-Cache: HIT / MISS)
+GET {{wh1}}/inventory/1
+
+### 1.7 Registrar movimiento de inventario (Entrada / RECEIPT) con Idempotency-Key
+POST {{wh1}}/inventory/movements
+Content-Type: application/json
+Idempotency-Key: MOV-REC-{{$guid}}
+
+{
+  "product_id": 1,
+  "type": "RECEIPT",
+  "quantity": 25,
+  "reference": "Orden de compra OC-1002"
+}
+
+### 1.8 Registrar movimiento de salida (SHIPMENT)
+POST {{wh1}}/inventory/movements
+Content-Type: application/json
+Idempotency-Key: MOV-SHIP-{{$guid}}
+
+{
+  "product_id": 1,
+  "type": "SHIPMENT",
+  "quantity": 5,
+  "reference": "Despacho Factura F-5541"
+}
+
+### 1.9 Historial de movimientos de un producto
+GET {{wh1}}/inventory/1/movements
+
+### 1.10 Auditoría del Transactional Outbox (Eventos PENDING y SENT)
+GET {{wh1}}/inventory/outbox/audit?limit=20
+
+
+### ------------------------------------------------------------------------------
+### 2. PLATAFORMA CENTRAL: Consultas Globales y CQRS
+### ------------------------------------------------------------------------------
+
+### 2.1 Dashboard Web Central
+GET {{central}}/
+
+### 2.2 Inventario global consolidado (Read Model CQRS)
+GET {{central}}/global/inventory
+
+### 2.3 Inventario global por SKU (con detección de bodegas stale)
+GET {{central}}/global/inventory/P-001
+
+### 2.4 Inventario global comparativo en vivo (Scatter-Gather síncrono vs Read Model)
+GET {{central}}/global/inventory/P-001/live
+
+### 2.5 Estado de salud y conectividad de todas las bodegas
+GET {{central}}/warehouses/status
+
+### 2.6 Métricas de la plataforma central
+GET {{central}}/metrics
+
+
+### ------------------------------------------------------------------------------
+### 3. TRANSFERENCIAS DISTRIBUIDAS (SAGA ORQUESTADA)
+### ------------------------------------------------------------------------------
+
+### 3.1 Solicitar transferencia exitosa entre WH-001 y WH-002 (HTTP 202)
+POST {{central}}/transfers
+Content-Type: application/json
+
+{
+  "source": "WH-001",
+  "destination": "WH-002",
+  "sku": "P-001",
+  "quantity": 10
+}
+
+### 3.2 Consultar estado de una transferencia (reemplazar TR-ID)
+GET {{central}}/transfers/TR-XXXXXXXX
+
+### 3.3 Probar transferencia con compensación automática (fallo simulado después de reservar)
+POST {{central}}/transfers
+Content-Type: application/json
+
+{
+  "source": "WH-001",
+  "destination": "WH-002",
+  "sku": "P-001",
+  "quantity": 10,
+  "simulate_failure": "after_reserve"
+}
+
+
+### ------------------------------------------------------------------------------
+### 4. REPORTES BATCH Y S3
+### ------------------------------------------------------------------------------
+
+### 4.1 Solicitar generación de reporte batch diario asíncrono (HTTP 202)
+POST {{central}}/reports
+Content-Type: application/json
+
+{
+  "date": "2026-11-20"
+}
+
+### 4.2 Consultar estado del job de reporte
+GET {{central}}/reports/jobs/JOB-XXXXXXXX
+
+
+### ------------------------------------------------------------------------------
+### 5. ADMINISTRACIÓN, COLAS Y DEAD LETTER QUEUE (DLQ)
+### ------------------------------------------------------------------------------
+
+### 5.1 Estado y profundidad de colas en RabbitMQ
+GET {{central}}/admin/queues
+
+### 5.2 Inyectar mensaje duplicado intencionalmente
+POST {{central}}/admin/inject/duplicate
+
+### 5.3 Inyectar JSON inválido a la cola (va directo a la DLQ sin reintentos)
+POST {{central}}/admin/inject/invalid_json
+
+### 5.4 Inyectar evento con campos obligatorios faltantes (va a DLQ)
+POST {{central}}/admin/inject/missing_fields
+
+### 5.5 Reinyectar mensajes acumulados en la DLQ a la cola principal
+POST {{central}}/admin/dlq/central.projection/replay

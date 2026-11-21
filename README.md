@@ -1,6 +1,6 @@
 # Warehouse Cloud Platform
 
-Plataforma distribuida multi-bodega del Proyecto Integrador de *Computación en la Nube e IoT*, implementada hasta la **Fase 11** (el enunciado y las guías por fase están en [`project/`](project/README.md)).
+Plataforma distribuida multi-bodega del Proyecto Integrador de *Computación en la Nube e IoT*, implementada con sus **12 Fases** completas (el enunciado y las guías por fase están en [`project/`](project/README.md)).
 
 ## Arquitectura en AWS
 
@@ -39,24 +39,24 @@ flowchart LR
 
 - Hub-and-spoke: cada bodega tiene su VPC con peering **solo** hacia la central; las bodegas no se ven entre sí.
 - Cada bodega es autónoma (API, PostgreSQL, Redis). La central consolida mediante eventos y no es la base operacional de nadie.
-- Decisiones y trade-offs: [`docs/adr.md`](docs/adr.md) · Eventos, colas y DLQ: [`docs/eventos.md`](docs/eventos.md) · Pruebas y resultados: [`docs/pruebas.md`](docs/pruebas.md)
+- Decisiones y trade-offs: [`docs/adr.md`](docs/adr.md) · Eventos, colas y DLQ: [`docs/eventos.md`](docs/eventos.md) · Pruebas y resultados: [`docs/pruebas.md`](docs/pruebas.md) · Saga: [`docs/saga.md`](docs/saga.md) · Inventario AWS: [`docs/aws.md`](docs/aws.md) · Extensión IoT: [`docs/iot.md`](docs/iot.md) · Colección API: [`docs/requests.http`](docs/requests.http) | [`docs/warehouse_api.postman_collection.json`](docs/warehouse_api.postman_collection.json)
 
 ## Estado por fase
 
 | Fase | Implementación |
 |---|---|
-| 1. API + PostgreSQL | CRUD de productos, movimientos con bloqueo de fila, `CHECK quantity >= 0`, `db/schema.sql` y migraciones |
+| 1. API + PostgreSQL | CRUD de productos, movimientos con bloqueo de fila, `CHECK quantity >= 0`, `db/schema.sql`, `db/seed.sql` montado e inicializado dinámicamente y migraciones |
 | 2. Redis | Cache Aside con TTL de 30 s, invalidación síncrona, fallback a PostgreSQL y cabecera `X-Cache` |
 | 3. RabbitMQ + workers | Transactional Outbox + relay; `POST /reports` → 202 + job asíncrono |
 | 4. Múltiples bodegas | 3 EC2/VPC independientes; `docker-compose.warehouse.yml` parametrizado |
 | 5. Load balancing | Nginx + 3 réplicas stateless por bodega (round-robin, failover por reintento y re-resolución DNS, `/health` en cada réplica) |
-| 6. Saga | `POST /transfers` orquestado con compensación e idempotencia por paso |
+| 6. Saga | `POST /transfers` orquestado con compensación e idempotencia por paso, máquina de estados en [`docs/saga.md`](docs/saga.md) |
 | 7. CQRS | Read model en la central, `/global/inventory/{sku}` con detección de bodegas desactualizadas |
 | 8. S3 + Batch | Reporte diario y snapshots en S3 (cron 23:00 UTC o `POST /reports`), reejecutable |
 | 9. Lambda | Validador de reportes disparado por S3 vía EventBridge |
 | 10. Resiliencia | Reintentos con backoff, DLQ, replay, idempotencia persistente, matriz de errores |
 | 11. Observabilidad + carga | `X-Correlation-ID` de punta a punta, logs JSON, `/metrics`, escenarios k6 |
-| 12. Extensión IoT | Simulador de sensores de telemetría multi-bodega con métricas, reordenamiento y duplicados (`scripts/simulate_iot.py`) |
+| 12. Extensión IoT | Pipeline completo: Ingestion Service, topic exchange RabbitMQ (`warehouse.iot`), persistencia en BD, alertas por umbrales y simulador con 100 sensores en 5 bodegas ([`docs/iot.md`](docs/iot.md)) |
 
 ## Estructura
 

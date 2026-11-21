@@ -3,7 +3,7 @@ import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text, create_engine
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, Text, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 DATABASE_URL = os.getenv("CENTRAL_DATABASE_URL", "sqlite:///./central.db")
@@ -107,6 +107,35 @@ class IntegrationEvent(Base):
     source = Column(String, nullable=False)
     payload = Column(JSON)
     received_at = Column(DateTime(timezone=True), default=now)
+
+
+class SensorTelemetry(Base):
+    """Telemetría persistida de sensores IoT por bodega (Fase 12)."""
+    __tablename__ = "sensor_telemetry"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String, unique=True, index=True, nullable=False)
+    sequence_number = Column(Integer, nullable=False)
+    warehouse_id = Column(String, index=True, nullable=False)
+    sensor_id = Column(String, index=True, nullable=False)
+    sensor_type = Column(String, nullable=False)  # TEMP, HUM, MOV, PWR
+    value = Column(Float, nullable=False)
+    unit = Column(String)
+    timestamp = Column(DateTime(timezone=True), nullable=False)
+    received_at = Column(DateTime(timezone=True), default=now)
+
+
+class SensorAlert(Base):
+    """Alertas generadas por umbrales anómalos en telemetría IoT."""
+    __tablename__ = "sensor_alerts"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String, nullable=False)
+    warehouse_id = Column(String, index=True, nullable=False)
+    sensor_id = Column(String, nullable=False)
+    sensor_type = Column(String, nullable=False)
+    value = Column(Float, nullable=False)
+    rule = Column(String, nullable=False)
+    alert_message = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=now)
 
 
 @contextmanager

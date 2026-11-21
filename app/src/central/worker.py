@@ -6,7 +6,7 @@ from shared.observability import setup_logging
 
 setup_logging()
 
-from consumers import project_inventory_event, run_consumer  # noqa: E402
+from consumers import process_iot_event, project_inventory_event, run_consumer  # noqa: E402
 from db import Base, engine  # noqa: E402
 from reports import handle_report, on_report_dead  # noqa: E402
 from saga import handle_transfer, on_transfer_dead  # noqa: E402
@@ -15,6 +15,7 @@ CONSUMERS = {
     "central.projection": (project_inventory_event, None),
     "central.transfers": (handle_transfer, on_transfer_dead),
     "central.reports": (handle_report, on_report_dead),
+    "central.iot.telemetry": (process_iot_event, None),
 }
 
 if __name__ == "__main__":
